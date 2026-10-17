@@ -20,7 +20,7 @@ except ImportError:
 #              KONFIGURACIJA
 # ══════════════════════════════════════════════
 BOT_NAME   = "MONIKA BOT"
-VERSION    = "v4.3"
+VERSION    = "v4.4"
 TOKEN      = os.environ.get("DISCORD_TOKEN")
 BOT_PREFIX = "."
 
@@ -1060,7 +1060,7 @@ class WelcomeView(discord.ui.View):
             embed = discord.Embed(
                 title="🌹 Dobrodošlica je poslata!",
                 description=(
-                    f"> 🌹 **{interaction.user.display_name}** je poslao/la "
+                    f"> 🌹 {interaction.user.mention} je poslao/la "
                     f"dobrodošlicu {target_mention} na **{guild_name}**! 🌿\n"
                     f">\n"
                     f"> Prva osoba koja je kliknula dugme poželjela je dobrodošlicu "
@@ -1123,6 +1123,40 @@ async def remember_welcome_message(
         WelcomeView(member_id, music_channel_id, guild_id, pozdrav_channel_id),
         message_id=message.id,
     )
+
+def build_command_catalog_embeds():
+    """Napravi čitljiv, ažuran spisak registrovanih prefix i slash komandi."""
+    prefix_commands = sorted(
+        {f".{command.name}" for command in bot.commands},
+        key=str.casefold,
+    )
+    slash_commands = sorted(
+        {f"/{command.name}" for command in bot.tree.get_commands()},
+        key=str.casefold,
+    )
+    embeds = []
+    page_size = 30
+    pages = [
+        prefix_commands[index:index + page_size]
+        for index in range(0, len(prefix_commands), page_size)
+    ]
+    for index, page in enumerate(pages, start=1):
+        embeds.append(discord.Embed(
+            title=f"📚 Prefix komande ({index}/{len(pages)})",
+            description=" · ".join(f"`{name}`" for name in page),
+            color=_LP,
+        ))
+    embeds.append(discord.Embed(
+        title="⚙️ Slash komande",
+        description=(
+            " · ".join(f"`{name}`" for name in slash_commands)
+            + "\n\nNeke komande su dostupne samo vlasniku bota ili administratorima."
+        ),
+        color=_LP,
+    ))
+    for embed in embeds:
+        embed.set_footer(text=f"{BOT_NAME} {VERSION} • prefix: .")
+    return embeds
 
 class InfoView(discord.ui.View):
     """Dugmad za detaljne informacije o serveru."""
@@ -1188,6 +1222,15 @@ class InfoView(discord.ui.View):
             ),
             inline=False,
         )
+        embed.add_field(
+            name="🔤 Kaladont",
+            value=(
+                "> Pokreni `.kaladont`, pa šalji riječi naizmjenično s drugim članovima.\n"
+                "> Uspješan odgovor prikazuje člana kao oznaku i riječ VELIKIM SLOVIMA.\n"
+                "> Za cijeli spisak komandi klikni dugme **Opis • sve komande**."
+            ),
+            inline=False,
+        )
         if cfg.get("events_channel_id"):
             embed.add_field(
                 name="📅 Eventi",
@@ -1198,6 +1241,24 @@ class InfoView(discord.ui.View):
             embed.set_thumbnail(url=interaction.guild.icon.url)
         embed.set_footer(text=f"{BOT_NAME} {VERSION} • informacije")
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(
+        label="Opis • sve komande",
+        emoji="📚",
+        style=discord.ButtonStyle.secondary,
+        custom_id="squad_info_all_commands",
+    )
+    async def all_commands(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+        embeds = build_command_catalog_embeds()
+        await interaction.response.send_message(
+            embeds=embeds,
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     @discord.ui.button(
         label="GWS & Events",
@@ -1301,8 +1362,7 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff prijava"):
         embed = discord.Embed(
             title="📋 Nova Staff prijava",
             description=(
-                f"Prijava korisnika {interaction.user.mention} "
-                f"(**{interaction.user.display_name}**)"
+                f"Prijava korisnika {interaction.user.mention}"
             ),
             color=_LP,
         )
@@ -2808,8 +2868,9 @@ async def info_postavi(interaction: discord.Interaction):
     embed = discord.Embed(
         title=f"💜 {interaction.guild.name} — informacije",
         description=(
-            "> Klikni dugme ispod da pročitaš pravila, saznaš više o serveru "
-            "ili pogledaš giveawaye i evente."
+            "> Klikni **Info** za pravila, **Opis • sve komande** za spisak komandi "
+            "ili **GWS & Events** za giveawaye i evente.\n"
+            "> Isprobaj i mini-igru `.kaladont`."
         ),
         color=_LP,
     )
@@ -3081,7 +3142,7 @@ async def veza(ctx: commands.Context, target: discord.Member = None):
     if p_sender["partner_id"] is not None:
         await ctx.send(embed=discord.Embed(description="> ❌ Već si u vezi ili braku!", color=_LP)); return
     if p_target["partner_id"] is not None:
-        await ctx.send(embed=discord.Embed(description=f"> ❌ **{target.display_name}** je već u vezi ili braku.", color=_LP)); return
+        await ctx.send(embed=discord.Embed(description=f"> ❌ {target.mention} je već u vezi ili braku.", color=_LP)); return
 
     e = discord.Embed(title="💌 Prijedlog za vezu", color=_LP)
     e.description = (
@@ -3104,7 +3165,7 @@ async def veza(ctx: commands.Context, target: discord.Member = None):
     try:
         reaction, _ = await bot.wait_for("reaction_add", timeout=60.0, check=check)
     except asyncio.TimeoutError:
-        await msg.edit(embed=discord.Embed(description=f"> ⏰ **{target.display_name}** nije odgovorio/la. Prijedlog je istekao.", color=_LP)); return
+        await msg.edit(embed=discord.Embed(description=f"> ⏰ {target.mention} nije odgovorio/la. Prijedlog je istekao.", color=_LP)); return
 
     if str(reaction.emoji) == "✅":
         today = datetime.now(timezone.utc).strftime("%d.%m.%Y")
@@ -3124,7 +3185,7 @@ async def veza(ctx: commands.Context, target: discord.Member = None):
         ok.set_footer(text=f"Veza uspostavljena: {today}")
         await msg.edit(embed=ok)
     else:
-        await msg.edit(embed=discord.Embed(description=f"> 💔 **{target.display_name}** je odbio/la prijedlog za vezu.", color=_LP))
+        await msg.edit(embed=discord.Embed(description=f"> 💔 {target.mention} je odbio/la prijedlog za vezu.", color=_LP))
 
 # ══════════════════════════════════════════════
 #   .brak @Partner — Prijedlog za brak
@@ -3175,7 +3236,7 @@ async def brak(ctx: commands.Context, partner: discord.Member = None):
     try:
         reaction, _ = await bot.wait_for("reaction_add", timeout=60.0, check=check)
     except asyncio.TimeoutError:
-        await msg.edit(embed=discord.Embed(description=f"> ⏰ **{partner.display_name}** nije odgovorio/la. Prijedlog je istekao.", color=_LP)); return
+        await msg.edit(embed=discord.Embed(description=f"> ⏰ {partner.mention} nije odgovorio/la. Prijedlog je istekao.", color=_LP)); return
 
     if str(reaction.emoji) == "✅":
         today = datetime.now(timezone.utc).strftime("%d.%m.%Y")
@@ -3194,7 +3255,7 @@ async def brak(ctx: commands.Context, partner: discord.Member = None):
         ok.set_footer(text=f"Brak sklopljen: {today}")
         await msg.edit(embed=ok)
     else:
-        await msg.edit(embed=discord.Embed(description=f"> 💔 **{partner.display_name}** je odbio/la prijedlog za brak.", color=_LP))
+        await msg.edit(embed=discord.Embed(description=f"> 💔 {partner.mention} je odbio/la prijedlog za brak.", color=_LP))
 
 # ══════════════════════════════════════════════
 #   .prsten — Prstenovi
@@ -3267,7 +3328,7 @@ async def prsten(ctx: commands.Context, partner: discord.Member = None):
     try:
         reaction, _ = await bot.wait_for("reaction_add", timeout=60.0, check=check)
     except asyncio.TimeoutError:
-        await msg.edit(embed=discord.Embed(description=f"> ⏰ **{partner.display_name}** nije odgovorio/la.", color=_LP)); return
+        await msg.edit(embed=discord.Embed(description=f"> ⏰ {partner.mention} nije odgovorio/la.", color=_LP)); return
 
     if str(reaction.emoji) == "✅":
         today     = datetime.now(timezone.utc).strftime("%d.%m.%Y")
@@ -3289,7 +3350,7 @@ async def prsten(ctx: commands.Context, partner: discord.Member = None):
         ok.set_footer(text=f"Brak sklopljen: {today}")
         await msg.edit(embed=ok)
     else:
-        await msg.edit(embed=discord.Embed(description=f"> 💔 **{partner.display_name}** je odbio/la prijedlog.", color=_LP))
+        await msg.edit(embed=discord.Embed(description=f"> 💔 {partner.mention} je odbio/la prijedlog.", color=_LP))
 
 # ══════════════════════════════════════════════
 #   .svadba — Ceremonija
@@ -3424,9 +3485,9 @@ async def zakletva(ctx: commands.Context, *, tekst: str = None):
         zak = data["zakletva"].get(ck)
         if zak:
             partner      = ctx.guild.get_member(p["partner_id"])
-            partner_name = partner.display_name if partner else f"ID:{p['partner_id']}"
+            partner_name = partner.mention if partner else f"<@{p['partner_id']}>"
             e = discord.Embed(title="📜 Bračna zakletva", color=_LP)
-            e.description = f"> 📖 *\"{zak['tekst']}\"*\n>\n> — {ctx.author.display_name} za {partner_name}"
+            e.description = f"> 📖 *\"{zak['tekst']}\"*\n>\n> — {ctx.author.mention} za {partner_name}"
             e.set_footer(text=f"Napisano: {zak.get('datum','?')} • {BOT_NAME} {VERSION}")
             await ctx.send(embed=e)
         else:
@@ -3480,7 +3541,7 @@ async def spavanje(ctx: commands.Context):
         )); return
 
     partner      = ctx.guild.get_member(p["partner_id"])
-    partner_name = partner.display_name if partner else f"ID:{p['partner_id']}"
+    partner_name = partner.mention if partner else f"<@{p['partner_id']}>"
     bonus        = random.randint(30, 80)
     p["love"]       = p.get("love", 0) + bonus
     p["xp"]         = p.get("xp", 0) + 5
@@ -3590,9 +3651,9 @@ async def zagrljaj(ctx: commands.Context, target: discord.Member = None):
     save_data(data)
 
     ZAGRLJAJ_PORUKE = [
-        f"**{ctx.author.display_name}** čvrsto grli **{target.display_name}**! 🤗",
-        f"**{ctx.author.display_name}** zagrljuje **{target.display_name}** toplim zagrljajem! 💞",
-        f"**{ctx.author.display_name}** ogrljuje **{target.display_name}** i ne pušta! 🥰",
+        f"{ctx.author.mention} čvrsto grli {target.mention}! 🤗",
+        f"{ctx.author.mention} zagrljuje {target.mention} toplim zagrljajem! 💞",
+        f"{ctx.author.mention} ogrljuje {target.mention} i ne pušta! 🥰",
     ]
     e = discord.Embed(title="🤗 Zagrljaj!", color=_LP)
     e.description = (
@@ -3637,9 +3698,9 @@ async def poljubac(ctx: commands.Context, target: discord.Member = None):
     save_data(data)
 
     POLJUBAC_PORUKE = [
-        f"**{ctx.author.display_name}** nježno ljubi **{target.display_name}**! 💋",
-        f"**{ctx.author.display_name}** ukralo je poljubac od **{target.display_name}**! 😘",
-        f"**{ctx.author.display_name}** daje strasan poljubac **{target.display_name}**! 💕",
+        f"{ctx.author.mention} nježno ljubi {target.mention}! 💋",
+        f"{ctx.author.mention} ukralo je poljubac od {target.mention}! 😘",
+        f"{ctx.author.mention} daje strasan poljubac {target.mention}! 💕",
     ]
     e = discord.Embed(title="💋 Poljubac!", color=_LP)
     e.description = (
@@ -3663,10 +3724,10 @@ async def ples(ctx: commands.Context, target: discord.Member = None):
         await ctx.send(embed=discord.Embed(description="> ❌ Ne možeš plesati sam/a!", color=_LP)); return
 
     PLESOVI = [
-        f"**{ctx.author.display_name}** i **{target.display_name}** plešu waltz! 💃🕺",
-        f"**{ctx.author.display_name}** i **{target.display_name}** plešu tango! 🌹",
-        f"**{ctx.author.display_name}** i **{target.display_name}** plešu breakdance! 🎶",
-        f"**{ctx.author.display_name}** i **{target.display_name}** vrtoglavim se po parketu! ✨",
+        f"{ctx.author.mention} i {target.mention} plešu waltz! 💃🕺",
+        f"{ctx.author.mention} i {target.mention} plešu tango! 🌹",
+        f"{ctx.author.mention} i {target.mention} plešu breakdance! 🎶",
+        f"{ctx.author.mention} i {target.mention} vrtoglavo se okreću po parketu! ✨",
     ]
     data = load_data()
     award_love(
@@ -3690,9 +3751,9 @@ async def pijte(ctx: commands.Context):
     if not await check_kanal(ctx, "ljubav"):
         return
     PIJENJA = [
-        f"**{ctx.author.display_name}** nazdravlja svima! 🥂",
-        f"**{ctx.author.display_name}** naručuje krug za cijeli server! 🍺",
-        f"**{ctx.author.display_name}** ispija šampanjac! 🍾",
+        f"{ctx.author.mention} nazdravlja svima! 🥂",
+        f"{ctx.author.mention} naručuje krug za cijeli server! 🍺",
+        f"{ctx.author.mention} ispija šampanjac! 🍾",
     ]
     data = load_data()
     award_love(data, ctx.author.id, love=10, xp=2)
@@ -3729,7 +3790,7 @@ async def film(ctx: commands.Context):
     save_data(data)
     e = discord.Embed(title="🎬 Film veče!", color=_LP)
     e.description = (
-        f"> **{ctx.author.display_name}** gleda **{film_naziv}**\n"
+        f"> {ctx.author.mention} gleda **{film_naziv}**\n"
         f"> i {random.choice(REAKCIJE)}!\n>\n"
         f"> 💗 **+10 bodova ljubavi**\n> ⭐ **+2 XP**"
     )
@@ -3758,7 +3819,7 @@ async def istina(ctx: commands.Context):
     save_data(data)
     e = discord.Embed(title="🎯 Istina ili laž!", color=_LP)
     e.description = (
-        f"> **{ctx.author.display_name}**, odgovori iskreno:\n>\n"
+        f"> {ctx.author.mention}, odgovori iskreno:\n>\n"
         f"> ❓ **{random.choice(PITANJA)}**\n>\n"
         f"> 💗 **+10 bodova ljubavi**\n> ⭐ **+2 XP**"
     )
@@ -3786,7 +3847,7 @@ async def izazov(ctx: commands.Context):
     save_data(data)
     e = discord.Embed(title="⚡ Izazov!", color=_LP)
     e.description = (
-        f"> **{ctx.author.display_name}** prihvata izazov:\n>\n"
+        f"> {ctx.author.mention} prihvata izazov:\n>\n"
         f"> 🎯 **{random.choice(IZAZOVI)}**\n>\n"
         f"> 💗 **+15 bodova ljubavi**\n> ⭐ **+3 XP**"
     )
@@ -3830,7 +3891,7 @@ async def ljubavni_test(ctx: commands.Context, target: discord.Member = None):
 
     e = discord.Embed(title=f"💘 Ljubavni test!", color=_LP)
     e.description = (
-        f"> **{ctx.author.display_name}** {emoji} **{target.display_name}**\n"
+        f"> {ctx.author.mention} {emoji} {target.mention}\n"
         f">\n"
         f"> {bar}\n"
         f"> **{postotak}% kompatibilnosti**\n"
@@ -3873,7 +3934,7 @@ async def compatibility(ctx: commands.Context, target: discord.Member = None):
     save_data(data)
     e = discord.Embed(title="🔮 Compatibility analiza", color=_LP)
     e.description = (
-        f"> **{ctx.author.display_name}** & **{target.display_name}**\n"
+        f"> {ctx.author.mention} & {target.mention}\n"
         f">\n"
         f"> **Ukupna kompatibilnost: {postotak}%**\n"
         f">\n"
@@ -4023,12 +4084,12 @@ async def djeca(ctx: commands.Context):
 
     djeca_lista = p.get("djeca", [])
     partner      = ctx.guild.get_member(p["partner_id"])
-    partner_name = partner.display_name if partner else f"ID:{p['partner_id']}"
+    partner_name = partner.mention if partner else f"<@{p['partner_id']}>"
 
     if not djeca_lista:
         e = discord.Embed(title="👨‍👩‍👧‍👦 Vaša porodica", color=_LP)
         e.description = (
-            f"> **{ctx.author.display_name}** & **{partner_name}**\n"
+            f"> {ctx.author.mention} & {partner_name}\n"
             f">\n"
             f"> Još nemate djece!\n"
             f"> Koristi `.beba` da dobiješ dijete! 🍼"
@@ -4037,7 +4098,7 @@ async def djeca(ctx: commands.Context):
         lista_txt = "\n".join(f"> {i+1}. {d['emoji']} **{d['ime']}** ({d['spol']}, {d['datum']})" for i, d in enumerate(djeca_lista))
         e = discord.Embed(title="👨‍👩‍👧‍👦 Vaša porodica", color=_LP)
         e.description = (
-            f"> **{ctx.author.display_name}** & **{partner_name}**\n"
+            f"> {ctx.author.mention} & {partner_name}\n"
             f">\n"
             f"> Vaša djeca ({len(djeca_lista)}):\n"
             + lista_txt
@@ -4285,12 +4346,12 @@ async def album(ctx: commands.Context):
 
     uspomene = p.get("uspomene", [])
     partner      = ctx.guild.get_member(p["partner_id"])
-    partner_name = partner.display_name if partner else f"ID:{p['partner_id']}"
+    partner_name = partner.mention if partner else f"<@{p['partner_id']}>"
 
     e = discord.Embed(title="📸 Album uspomena", color=_LP)
     if not uspomene:
         e.description = (
-            f"> **{ctx.author.display_name}** & **{partner_name}**\n"
+            f"> {ctx.author.mention} & {partner_name}\n"
             f">\n"
             f"> Album je prazan! Koristite `.putovanje` da\n"
             f"> napravite prve uspomene! ✈️"
@@ -4298,7 +4359,7 @@ async def album(ctx: commands.Context):
     else:
         linije = [f"> 📍 **{u['naziv']}** — {u['datum']}" for u in uspomene[-10:]]
         e.description = (
-            f"> **{ctx.author.display_name}** & **{partner_name}**\n"
+            f"> {ctx.author.mention} & {partner_name}\n"
             f"> Ukupno uspomena: **{len(uspomene)}**\n"
             f">\n"
             + "\n".join(linije)
@@ -4319,7 +4380,7 @@ async def datum(ctx: commands.Context):
         await ctx.send(embed=discord.Embed(description="> ❌ Nisi u vezi ni braku!", color=_LP)); return
 
     partner      = ctx.guild.get_member(p["partner_id"])
-    partner_name = partner.display_name if partner else f"ID:{p['partner_id']}"
+    partner_name = partner.mention if partner else f"<@{p['partner_id']}>"
 
     veza_date = p.get("veza_date") or p.get("brak_date")
     if not veza_date:
@@ -4337,7 +4398,7 @@ async def datum(ctx: commands.Context):
 
     e = discord.Embed(title="📅 Datum veze", color=_LP)
     e.description = (
-        f"> **{ctx.author.display_name}** & **{partner_name}**\n"
+        f"> {ctx.author.mention} & {partner_name}\n"
         f">\n"
         f"> Zajedno od: **{veza_date}**\n"
         f">\n"
@@ -4361,7 +4422,7 @@ async def godisnjica(ctx: commands.Context):
         await ctx.send(embed=discord.Embed(description="> ❌ Nisi u vezi ni braku!", color=_LP)); return
 
     partner      = ctx.guild.get_member(p["partner_id"])
-    partner_name = partner.display_name if partner else f"ID:{p['partner_id']}"
+    partner_name = partner.mention if partner else f"<@{p['partner_id']}>"
 
     veza_date = p.get("veza_date") or p.get("brak_date")
     if not veza_date:
@@ -4382,7 +4443,7 @@ async def godisnjica(ctx: commands.Context):
 
     e = discord.Embed(title="🎂 Godišnjica", color=_LP)
     e.description = (
-        f"> **{ctx.author.display_name}** & **{partner_name}**\n"
+        f"> {ctx.author.mention} & {partner_name}\n"
         f">\n"
         f"> Veza od: **{veza_date}**\n"
         f"> Sljedeća godišnjica: **{sljedeca.strftime('%d.%m.%Y')}**\n"
@@ -4407,7 +4468,7 @@ async def razina(ctx: commands.Context):
     xp       = p.get("xp", 0)
     current, next_lvl = get_level(xp)
     partner      = ctx.guild.get_member(p["partner_id"])
-    partner_name = partner.display_name if partner else f"ID:{p['partner_id']}"
+    partner_name = partner.mention if partner else f"<@{p['partner_id']}>"
 
     linije = []
     for lvl in PARA_LEVELI:
@@ -4418,7 +4479,7 @@ async def razina(ctx: commands.Context):
 
     e = discord.Embed(title="📈 Level sistem za parove", color=_LP)
     e.description = (
-        f"> **{ctx.author.display_name}** & **{partner_name}**\n"
+        f"> {ctx.author.mention} & {partner_name}\n"
         f">\n"
         + "\n".join(linije)
     )
@@ -4442,7 +4503,7 @@ async def statistika(ctx: commands.Context):
         await ctx.send(embed=discord.Embed(description="> ❌ Nisi u vezi ni braku!", color=_LP)); return
 
     partner      = ctx.guild.get_member(p["partner_id"])
-    partner_name = partner.display_name if partner else f"ID:{p['partner_id']}"
+    partner_name = partner.mention if partner else f"<@{p['partner_id']}>"
     xp           = p.get("xp", 0)
     love         = p.get("love", 0)
     current, _   = get_level(xp)
@@ -4455,7 +4516,7 @@ async def statistika(ctx: commands.Context):
 
     status_txt = "U braku 💍" if p["status"] == "brak" else "U vezi ❤️"
     e = discord.Embed(title=f"📊 Statistika para", color=_LP)
-    e.description = f"> **{ctx.author.display_name}** & **{partner_name}**"
+    e.description = f"> {ctx.author.mention} & {partner_name}"
     e.add_field(name="Status",    value=f"> {status_txt}",        inline=True)
     e.add_field(name="Razina",    value=f"> {current[2]}",        inline=True)
     e.add_field(name="XP",        value=xp_bar(xp),               inline=False)
@@ -4488,11 +4549,16 @@ async def profil(ctx: commands.Context, korisnik: discord.Member = None):
     best   = get_best_prsten(love)
     current, next_lvl = get_level(xp)
 
-    e = discord.Embed(title=f"👤 Ljubavni profil — {target.display_name}", color=_LP)
+    e = discord.Embed(title="👤 Ljubavni profil", color=_LP)
     e.set_thumbnail(url=target.display_avatar.url)
 
     status_txt = STATUS_EMOJI.get(p["status"], "Nepoznato")
-    e.description = f"> **Status:** {status_txt}\n> **Prsten:** {best['emoji']} {best['naziv']}\n> **Razina:** {current[2]}"
+    e.description = (
+        f"> **Član:** {target.mention}\n"
+        f"> **Status:** {status_txt}\n"
+        f"> **Prsten:** {best['emoji']} {best['naziv']}\n"
+        f"> **Razina:** {current[2]}"
+    )
 
     if p["partner_id"] is not None:
         partner      = ctx.guild.get_member(p["partner_id"])
@@ -4600,12 +4666,12 @@ async def stan_cmd(ctx: commands.Context):
         await ctx.send(embed=discord.Embed(description="> ❌ Nemaš partnera!", color=_LP)); return
 
     partner      = ctx.guild.get_member(p["partner_id"])
-    partner_name = partner.display_name if partner else f"ID:{p['partner_id']}"
+    partner_name = partner.mention if partner else f"<@{p['partner_id']}>"
     s            = get_stan(data, ctx.author.id, p["partner_id"])
 
     naslov = "🏠 Vaša kuća" if s.get("kuca_kupljena") else "🏠 Stan"
     e = discord.Embed(title=naslov, color=_LP)
-    e.description = f"> **{ctx.author.display_name}** & **{partner_name}**"
+    e.description = f"> {ctx.author.mention} & {partner_name}"
 
     # Sobe
     sobe_status = []
@@ -4908,8 +4974,9 @@ async def novac(ctx: commands.Context, korisnik: discord.Member = None):
     data   = load_data()
     e      = get_ekonomija(data, target.id)
 
-    emb = discord.Embed(title=f"💰 Novčanik — {target.display_name}", color=_LP)
+    emb = discord.Embed(title="💰 Novčanik", color=_LP)
     emb.description = (
+        f"> **Član:** {target.mention}\n"
         f"> 💳 Gotovina: **{e['novac']:,} 💰**\n"
         f"> 🏦 Banka: **{e['banka']:,} 💰**\n"
         f"> 💎 Ukupno: **{e['novac'] + e['banka']:,} 💰**\n"
@@ -5236,7 +5303,7 @@ async def ribnjak(ctx: commands.Context, korisnik: discord.Member = None):
 
     if not inv:
         await ctx.send(embed=discord.Embed(
-            description=f"> 🎣 **{target.display_name}** još nema riba u inventaru!",
+            description=f"> 🎣 {target.mention} još nema riba u inventaru!",
             color=_LP
         )); return
 
@@ -5256,8 +5323,8 @@ async def ribnjak(ctx: commands.Context, korisnik: discord.Member = None):
             linije.append(f"> {info['emoji']} **{info['naziv']}** x{kolicina} — {rar_e} — **{vr} coina**")
 
     nivo, _ = ribar_nivo(r.get("ukupno_riba", 0))
-    e = discord.Embed(title=f"🐠 Ribnjak — {target.display_name}", color=_LP)
-    e.description = "\n".join(linije)
+    e = discord.Embed(title="🐠 Ribnjak", color=_LP)
+    e.description = f"> **Član:** {target.mention}\n>\n" + "\n".join(linije)
     e.add_field(name="💰 Ukupna vrijednost", value=f"> **{ukupna_vr} coina**",         inline=True)
     e.add_field(name="🐟 Ukupno riba",       value=f"> **{r.get('ukupno_riba', 0)}**", inline=True)
     e.add_field(name="🎣 Nivo ribara",        value=f"> **{nivo}**",                    inline=True)
@@ -5319,9 +5386,10 @@ async def ribar_profil(ctx: commands.Context, korisnik: discord.Member = None):
     filled   = int(pct * 10)
     nivo_bar = "🟦" * filled + "⬜" * (10 - filled) + f" Nivo {nivo}/{nivo_max}"
 
-    e = discord.Embed(title=f"🎣 Ribar profil — {target.display_name}", color=_LP)
+    e = discord.Embed(title="🎣 Ribar profil", color=_LP)
     e.set_thumbnail(url=target.display_avatar.url)
     e.description = (
+        f"> **Član:** {target.mention}\n"
         f"> **Nivo:** {nivo_bar}\n"
         f"> **Ukupno ulovljeno:** {ukupno_riba} riba\n"
         f"> **Coini:** {coins:,}\n"
@@ -5353,7 +5421,7 @@ async def topljubav(ctx: commands.Context):
                 m1 = ctx.guild.get_member(uid)
                 m2 = ctx.guild.get_member(pid)
                 if m1 and m2:
-                    lista.append((m1.display_name, m2.display_name, p.get("love", 0)))
+                    lista.append((m1.mention, m2.mention, p.get("love", 0)))
 
     lista.sort(key=lambda x: x[2], reverse=True)
     top = lista[:10]
@@ -5362,7 +5430,7 @@ async def topljubav(ctx: commands.Context):
         await ctx.send(embed=discord.Embed(description="> ❤️ Još nema parova na serveru!", color=_LP)); return
 
     medalje = ["🥇","🥈","🥉","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-    linije  = [f"> {medalje[i]} **{n1}** ❤️ **{n2}** — {love:,} bodova" for i, (n1, n2, love) in enumerate(top)]
+    linije  = [f"> {medalje[i]} {n1} ❤️ {n2} — {love:,} bodova" for i, (n1, n2, love) in enumerate(top)]
 
     e = discord.Embed(title="❤️ Top Ljubavnih Parova", color=_LP)
     e.description = "\n".join(linije)
@@ -5388,7 +5456,7 @@ async def topxp(ctx: commands.Context):
                 if m1 and m2:
                     xp = p.get("xp", 0)
                     current, _ = get_level(xp)
-                    lista.append((m1.display_name, m2.display_name, xp, current[2]))
+                    lista.append((m1.mention, m2.mention, xp, current[2]))
 
     lista.sort(key=lambda x: x[2], reverse=True)
     top = lista[:10]
@@ -5397,7 +5465,7 @@ async def topxp(ctx: commands.Context):
         await ctx.send(embed=discord.Embed(description="> ⭐ Još nema parova s XP-om!", color=_LP)); return
 
     medalje = ["🥇","🥈","🥉","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-    linije  = [f"> {medalje[i]} **{n1}** & **{n2}** — {xp:,} XP {lvl}" for i, (n1, n2, xp, lvl) in enumerate(top)]
+    linije  = [f"> {medalje[i]} {n1} & {n2} — {xp:,} XP {lvl}" for i, (n1, n2, xp, lvl) in enumerate(top)]
 
     e = discord.Embed(title="⭐ Top XP Parova", color=_LP)
     e.description = "\n".join(linije)
@@ -5415,7 +5483,7 @@ async def topbogati(ctx: commands.Context):
             member = ctx.guild.get_member(int(uid_str))
             if member:
                 ukupno = e.get("novac", 0) + e.get("banka", 0)
-                lista.append((member.display_name, ukupno, e.get("posao", "?")))
+                lista.append((member.mention, ukupno, e.get("posao", "?")))
         except Exception:
             pass
 
@@ -5426,7 +5494,7 @@ async def topbogati(ctx: commands.Context):
         await ctx.send(embed=discord.Embed(description="> 💰 Još nema korisnika s novcem!", color=_LP)); return
 
     medalje = ["🥇","🥈","🥉","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-    linije  = [f"> {medalje[i]} **{ime}** — {ukupno:,} 💰 | {posao}" for i, (ime, ukupno, posao) in enumerate(top)]
+    linije  = [f"> {medalje[i]} {ime} — {ukupno:,} 💰 | {posao}" for i, (ime, ukupno, posao) in enumerate(top)]
 
     e = discord.Embed(title="💰 Top Bogatih", color=_LP)
     e.description = "\n".join(linije)
@@ -5451,14 +5519,14 @@ async def topparovi(ctx: commands.Context):
                 m2 = ctx.guild.get_member(pid)
                 if m1 and m2:
                     djeca_br = len(p.get("djeca", []))
-                    lista.append((m1.display_name, m2.display_name, p.get("brak_date","?"), djeca_br))
+                    lista.append((m1.mention, m2.mention, p.get("brak_date","?"), djeca_br))
 
     top = lista[:10]
     if not top:
         await ctx.send(embed=discord.Embed(description="> 💍 Još nema bračnih parova!", color=_LP)); return
 
     medalje = ["🥇","🥈","🥉","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-    linije  = [f"> {medalje[i]} **{n1}** 💍 **{n2}** — od {datum} | 👶 {djeca}" for i, (n1, n2, datum, djeca) in enumerate(top)]
+    linije  = [f"> {medalje[i]} {n1} 💍 {n2} — od {datum} | 👶 {djeca}" for i, (n1, n2, datum, djeca) in enumerate(top)]
 
     e = discord.Embed(title="💍 Bračni parovi", color=_LP)
     e.description = "\n".join(linije)
@@ -5480,7 +5548,7 @@ async def topstanovi(ctx: commands.Context):
             m2 = ctx.guild.get_member(int(ids[1]))
             if m1 and m2:
                 sobe_br = sum(1 for v in s.get("sobe", {}).values() if v)
-                lista.append((m1.display_name, m2.display_name, sobe_br))
+                lista.append((m1.mention, m2.mention, sobe_br))
 
     lista.sort(key=lambda x: x[2], reverse=True)
     top = lista[:10]
@@ -5489,7 +5557,7 @@ async def topstanovi(ctx: commands.Context):
         await ctx.send(embed=discord.Embed(description="> 🏠 Još nema parova s kućom!", color=_LP)); return
 
     medalje = ["🥇","🥈","🥉","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-    linije  = [f"> {medalje[i]} **{n1}** & **{n2}** — {sobe}/6 soba" for i, (n1, n2, sobe) in enumerate(top)]
+    linije  = [f"> {medalje[i]} {n1} & {n2} — {sobe}/6 soba" for i, (n1, n2, sobe) in enumerate(top)]
 
     e = discord.Embed(title="🏠 Top Stanovi/Kuće", color=_LP)
     e.description = "\n".join(linije)
@@ -5506,7 +5574,7 @@ async def top_ribar(ctx: commands.Context):
         try:
             member = ctx.guild.get_member(int(uid_str))
             if member:
-                lista.append((member.display_name, r.get("ukupno_riba", 0), r.get("coins", 0)))
+                lista.append((member.mention, r.get("ukupno_riba", 0), r.get("coins", 0)))
         except Exception:
             pass
 
@@ -5517,7 +5585,7 @@ async def top_ribar(ctx: commands.Context):
         await ctx.send(embed=discord.Embed(description="> 🎣 Još nema ribara na serveru!", color=_LP)); return
 
     medalje = ["🥇","🥈","🥉","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-    linije  = [f"> {medalje[i]} **{ime}** — {ukupno} riba | {coins:,} coina" for i, (ime, ukupno, coins) in enumerate(top)]
+    linije  = [f"> {medalje[i]} {ime} — {ukupno} riba | {coins:,} coina" for i, (ime, ukupno, coins) in enumerate(top)]
 
     e = discord.Embed(title="🎣 Top 10 Ribara", color=_LP)
     e.description = "\n".join(linije)
@@ -5814,6 +5882,11 @@ KALADONT_GAMES = {}
 COUNTING_LOCKS = {}
 HOT_COLD_GAMES = {}
 PROCESSED_GAME_MESSAGE_IDS = set()
+KALADONT_STICKER_FILES = (
+    "kaladont_sticker_1.jpg",
+    "kaladont_sticker_2.jpg",
+)
+KALADONT_STICKER_ROTATION = {}
 
 def game_embed(title: str, lines, footer: str = None):
     e = discord.Embed(title=title, color=_LP)
@@ -5822,17 +5895,42 @@ def game_embed(title: str, lines, footer: str = None):
         e.set_footer(text=footer)
     return e
 
-def counting_embed(number: int, next_number: int = None, author_name: str = None, error: str = None):
+async def send_kaladont_embed(ctx: commands.Context, embed: discord.Embed):
+    """Pošalji Kaladont embed sa naizmjeničnom slikom iz paketa."""
+    channel_key = f"{ctx.guild.id if ctx.guild else 0}:{ctx.channel.id}"
+    image_index = KALADONT_STICKER_ROTATION.get(channel_key, 0)
+    filename = KALADONT_STICKER_FILES[image_index]
+    image_path = os.path.join(DATA_DIR, filename)
+    if not os.path.isfile(image_path):
+        print(f"[KALADONT] Nedostaje slika {filename}; šaljem embed bez nje.")
+        await ctx.send(
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        return
+
+    embed.set_thumbnail(url=f"attachment://{filename}")
+    image_file = discord.File(image_path, filename=filename)
+    await ctx.send(
+        embed=embed,
+        file=image_file,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+    KALADONT_STICKER_ROTATION[channel_key] = (
+        image_index + 1
+    ) % len(KALADONT_STICKER_FILES)
+
+def counting_embed(number: int, next_number: int = None, author_mention: str = None, error: str = None):
     """Embed za brojanje u stilu Discord reply kartice iz korisničkog primjera."""
     if error:
         description = (
             f"> ❌ {error}\n>\n"
-            f"**Poslao/la:** {discord.utils.escape_markdown(author_name or 'Član')}"
+            f"**Poslao/la:** {author_mention or 'Član'}"
         )
     else:
         description = (
             f"> ✅ **#{number}** · sljedeći: **{next_number}**\n>\n"
-            f"**Brojao/la:** {discord.utils.escape_markdown(author_name or 'Član')}"
+            f"**Brojao/la:** {author_mention or 'Član'}"
         )
     return discord.Embed(description=description, color=_LP)
 
@@ -5971,7 +6069,7 @@ async def counting(ctx: commands.Context, broj: int = None):
             save_data(data)
             embed = counting_embed(
                 broj,
-                author_name=ctx.author.display_name,
+                author_mention=ctx.author.mention,
                 error=f"Pogrešan broj — očekivao se **{expected}**. Brojanje se vraća na **1**.",
             )
         elif expected > 1 and last_user_id == ctx.author.id:
@@ -5979,7 +6077,7 @@ async def counting(ctx: commands.Context, broj: int = None):
             save_data(data)
             embed = counting_embed(
                 broj,
-                author_name=ctx.author.display_name,
+                author_mention=ctx.author.mention,
                 error="Ne možeš brojati dva puta zaredom. Brojanje se vraća na **1**.",
             )
         else:
@@ -5991,7 +6089,7 @@ async def counting(ctx: commands.Context, broj: int = None):
             embed = counting_embed(
                 broj,
                 next_number=broj + 1,
-                author_name=ctx.author.display_name,
+                author_mention=ctx.author.mention,
             )
     await send_counting_reply(ctx, embed)
 
@@ -6037,7 +6135,7 @@ async def kaladont(ctx: commands.Context, rijec: str = None):
             "last_author_id": None,
             "used": set(),
         }
-        await ctx.send(embed=game_embed(
+        await send_kaladont_embed(ctx, game_embed(
             "🔤 Kaladont",
             ["> Nova runda je počela!", "> Prva osoba šalje riječ komandom `.kaladont <riječ>`.", "> Riječ mora imati najmanje 2 slova.", "> Isti igrač ne može igrati dva puta zaredom."],
             "Ako riječ završava na „ka“, igrač gubi",
@@ -6045,12 +6143,16 @@ async def kaladont(ctx: commands.Context, rijec: str = None):
         return
     rijec = rijec.lower().strip()
     if len(rijec) < 2 or not rijec.isalpha():
-        await ctx.send(embed=game_embed("🔤 Kaladont", ["> Riječ mora sadržati samo slova i imati najmanje 2 slova."], "Primjer: .kaladont more"))
+        await send_kaladont_embed(ctx, game_embed(
+            "🔤 Kaladont",
+            ["> Riječ mora sadržati samo slova i imati najmanje 2 slova."],
+            "Primjer: .kaladont more",
+        ))
         return
     if not is_known_bhs_word(rijec):
-        await ctx.send(embed=game_embed(
+        await send_kaladont_embed(ctx, game_embed(
             "🔤 Kaladont",
-            [f"> Riječ **{rijec}** nije pronađena u B/H/S rječniku.",
+            [f"> Riječ **{rijec.upper()}** nije pronađena u B/H/S rječniku.",
              "> Unesi stvarnu riječ, bez izmišljanja slova."],
             "Riječ nije prihvaćena",
         ))
@@ -6060,27 +6162,45 @@ async def kaladont(ctx: commands.Context, rijec: str = None):
         KALADONT_GAMES[channel_id] = game
     game.setdefault("used", set())
     if game.get("last") and game.get("last_author_id") == ctx.author.id:
-        await ctx.send(embed=game_embed(
+        await send_kaladont_embed(ctx, game_embed(
             "🔤 Kaladont",
-            ["> Sačekaj da drugi član pošalje riječ.", "> Isti igrač ne može igrati dva puta zaredom."],
+            [f"> {ctx.author.mention}, sačekaj da drugi član pošalje riječ.",
+             "> Isti igrač ne može igrati dva puta zaredom."],
             "Red je na drugom igraču",
         ))
         return
     if rijec in game["used"]:
-        await ctx.send(embed=game_embed("🔤 Kaladont", ["> Ta riječ je već iskorištena."], "Probaj drugu riječ"))
+        await send_kaladont_embed(ctx, game_embed(
+            "🔤 Kaladont",
+            [f"> {ctx.author.mention}, ta riječ je već iskorištena."],
+            "Probaj drugu riječ",
+        ))
         return
     if game["last"] and not rijec.startswith(game["last"][-2:]):
-        await ctx.send(embed=game_embed("🔤 Kaladont", [f"> Riječ mora početi sa **{game['last'][-2:]}**."], "Kaladont pravilo"))
+        await send_kaladont_embed(ctx, game_embed(
+            "🔤 Kaladont",
+            [f"> Riječ mora početi sa **{game['last'][-2:].upper()}**."],
+            "Kaladont pravilo",
+        ))
         return
     game["used"].add(rijec)
     game["last"] = rijec
     game["last_author_id"] = ctx.author.id
     if rijec.endswith("ka"):
         KALADONT_GAMES.pop(channel_id, None)
-        poruka = [f"> 💥 **{ctx.author.display_name}** je poslao/la **{rijec}**.", "> Riječ se završava na „ka“ — runda je završena!"]
+        poruka = [
+            f"> 💥 {ctx.author.mention} je poslao/la **{rijec.upper()}**.",
+            "> Riječ se završava na „KA“ — runda je završena!",
+        ]
     else:
-        poruka = [f"> ✅ **{ctx.author.display_name}**: **{rijec}**", f"> Sljedeća riječ počinje sa **{rijec[-2:]}**."]
-    await ctx.send(embed=game_embed("🔤 Kaladont", poruka, "Nova runda: .kaladont"))
+        poruka = [
+            f"> ✅ {ctx.author.mention}: **{rijec.upper()}**",
+            f"> Sljedeća riječ počinje sa **{rijec[-2:].upper()}**.",
+        ]
+    await send_kaladont_embed(
+        ctx,
+        game_embed("🔤 Kaladont", poruka, "Nova runda: .kaladont"),
+    )
 
 # ══════════════════════════════════════════════
 #   MONIKA — kontrola zabavnog razgovora
@@ -6183,8 +6303,12 @@ async def giveaways(ctx: commands.Context):
     GIVEAWAY_TASKS[giveaway_id] = asyncio.create_task(finish_giveaway(giveaway_id))
 
 @bot.command(name="poruka")
-async def poruka(ctx: commands.Context, server_link: str = None):
-    """Vlasnik bota ili servera šalje pozivnicu članovima servera u DM."""
+async def poruka(
+    ctx: commands.Context,
+    server_link: str = None,
+    limit: int = 100,
+):
+    """Vlasnik bota ili servera šalje najviše 100 pozivnica u DM."""
     if ctx.guild is None:
         await ctx.send("Komandu `.poruka` pokreni u kanalu servera.", delete_after=8)
         return
@@ -6204,8 +6328,15 @@ async def poruka(ctx: commands.Context, server_link: str = None):
 
     if not server_link:
         await ctx.send(
-            "Upotreba: `.poruka <link-servera>`\n"
-            "Primjer: `.poruka https://discord.gg/tvoj-link`",
+            "Upotreba: `.poruka <link-servera> [broj 1-100]`\n"
+            "Primjer: `.poruka https://discord.gg/tvoj-link 100`",
+            delete_after=12,
+        )
+        return
+    if not 1 <= limit <= 100:
+        await ctx.send(
+            "Broj mora biti između **1 i 100**. Discord može odbiti DM "
+            "članovima koji ne dozvoljavaju privatne poruke.",
             delete_after=12,
         )
         return
@@ -6303,10 +6434,12 @@ async def poruka(ctx: commands.Context, server_link: str = None):
     embed.set_footer(text=f"{BOT_NAME} {VERSION} • pozivnica")
 
     status_message = await ctx.send(
-        f"Počinjem slati pozivnicu članovima servera **{ctx.guild.name}**..."
+        f"Počinjem slati pozivnicu u DM za najviše **{limit} članova** "
+        f"servera **{ctx.guild.name}**..."
     )
     poslato = 0
     preskoceno = 0
+    pokusano = 0
     dm_odbijeno = 0
     dm_http_greske = 0
     prva_dm_greska = None
@@ -6316,6 +6449,9 @@ async def poruka(ctx: commands.Context, server_link: str = None):
             if member.bot:
                 preskoceno += 1
                 continue
+            if pokusano >= limit:
+                break
+            pokusano += 1
             try:
                 await member.send(embed=embed)
                 poslato += 1
@@ -6345,7 +6481,8 @@ async def poruka(ctx: commands.Context, server_link: str = None):
         )
     else:
         final_text = (
-            f"Slanje završeno. Poslato: **{poslato}**, botovi preskočeni: "
+            f"Slanje završeno. Pokušano: **{pokusano}/{limit}**, poslato: "
+            f"**{poslato}**, botovi preskočeni: "
             f"**{preskoceno}**, Discord odbio privatnu poruku: **{dm_odbijeno}**."
         )
         if dm_http_greske:

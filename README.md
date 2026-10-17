@@ -1,4 +1,4 @@
-# MONIKA BOT Discord Bot — v4.3
+# MONIKA BOT Discord Bot — v4.4
 
 Ovo je kompletan Discord bot sa ljubavnim sistemom, virtuelnom ekonomijom,
 kućama za parove, ribolovom, rang-listama, welcome panelom i Info/GWS & Events
@@ -151,11 +151,13 @@ Postavi mali panel:
 /info-postavi
 ```
 
-Panel ima dva dugmeta:
+Panel ima tri dugmeta:
 
 - `Info` — pravila, informacije o serveru i načini zabave
 - `GWS & Events` — giveaway i event kanali
+- `Opis • sve komande` — privatan pregled svih registrovanih prefix i slash komandi
 
+Nakon ažuriranja ponovo pokreni `/info-postavi` da objaviš panel s novim dugmetom.
 Pregled podešavanja:
 
 ```text
@@ -326,17 +328,18 @@ Prefix je:
 
 ### Vlasnička pozivna poruka
 
-Vlasnik bota može poslati dobrodošlicu u privatne poruke svim članovima
-trenutnog servera:
+Vlasnik bota ili servera može poslati pozivnicu u privatne poruke najviše
+100 članovima po pokretanju:
 
 ```text
-.poruka https://discord.gg/tvoj-link
+.poruka https://discord.gg/tvoj-link 100
 ```
 
 Komandu može koristiti vlasnik bota ili vlasnik servera. Poruka sadrži pozivni
-link i pregled glavnih komandi. Botovi se preskaču, a članovi koji imaju
-zatvorene privatne poruke prikazuju se u završnom izvještaju. Ako je `/setlogin`
-podešen, `.poruka` se mora pokrenuti u tom komandnom kanalu.
+link i pregled glavnih komandi. Broj je opcionalan (podrazumijevano 100; raspon
+1–100). Botovi se preskaču. Završni izvještaj razdvaja poslato, Discord odbijene
+DM-ove i druge HTTP greške. Bot ne može zaobići članske postavke privatnosti.
+Ako je `/setlogin` podešen, `.poruka` se mora pokrenuti u tom komandnom kanalu.
 
 ### Ljubav i veze
 
@@ -398,10 +401,13 @@ Prefix svih komandi je tačka (`.`):
 - `.kaladont` — riječ mora početi sa posljednja dva slova prethodne riječi
 
 Stanje svake igre je odvojeno po Discord kanalu. Counting prikazuje prihvaćeni
-broj, sljedeći broj i ime člana u tamnom embed-u, kao odgovor na poruku s brojem.
+broj, sljedeći broj i tagovanog člana u tamnom embed-u, kao odgovor na poruku s brojem.
 Ne možeš brojati dva broja zaredom; pogrešan broj ili isti član resetuju rundu
 na 1. Broj i posljednji član čuvaju se u `ljubav_data.json` i preživljavaju
 restart. Ostali odgovori mini-igara koriste kompaktni embed stil.
+
+Kaladont taguje člana, ispisuje riječi velikim slovima i uz odgovore naizmjenično
+prikazuje dvije ugrađene slike iz ZIP paketa.
 
 U podešenim kanalima za `counting`, `toplo-hladno`, `kaladont` ili
 `casino` moguće je slati i skraćeni unos bez prefixa:
@@ -540,6 +546,7 @@ Provjereno:
 - pri pokretanju se ispisuje stvarni rezultat slash komandi sinhronizovanih sa Discordom
 - dugmad panelâ koriste sigurne Unicode ikone, kako nevažeći custom emoji ne bi blokirao slanje
 - counting stanje se čuva trajno, a tačan unos se vraća kao reply embed
+- Kaladont mijenja dvije priložene slike naizmjenično; Info panel ima dugme za sve komande
 
 ### Evidencija ljubavnih aktivnosti
 
