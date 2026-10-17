@@ -20,7 +20,7 @@ except ImportError:
 #              KONFIGURACIJA
 # ══════════════════════════════════════════════
 BOT_NAME   = "MONIKA BOT"
-VERSION    = "v4.1"
+VERSION    = "v4.2"
 TOKEN      = os.environ.get("DISCORD_TOKEN")
 BOT_PREFIX = "."
 
@@ -344,6 +344,7 @@ def load_data() -> dict:
         "albumi": {},
         "zakletva": {},
         "welcome_greetings": {},
+        "welcome_messages": {},
         "support": {},
         "monika": {},
         "pomoc_usage": {},
@@ -988,6 +989,7 @@ class WelcomeView(discord.ui.View):
                 emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["music"]),
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
+                custom_id="squad_welcome_music_disabled",
             ))
 
     @discord.ui.button(
@@ -1067,6 +1069,57 @@ class WelcomeView(discord.ui.View):
                 text=f"{BOT_NAME} {VERSION} • dobrodošlica"
             )
             await output_channel.send(embed=embed)
+
+def build_welcome_embed(member, guild: discord.Guild, cfg: dict, test: bool = False):
+    """Isti welcome izgled za nove članove, test i pregled nakon podešavanja."""
+    def mention(channel_key: str, fallback: str) -> str:
+        channel_id = cfg.get(channel_key)
+        return f"<#{channel_id}>" if channel_id else fallback
+
+    pravila = mention("pravila_channel_id", "#pravila")
+    chat = mention("chat_channel_id", "#chat")
+    sada = datetime.now(timezone.utc).strftime("%H:%M")
+    embed = discord.Embed(
+        description=(
+            f"🌸 Dobrodošao/la {member.mention} na 🥂 **{guild.name}**! 🌿\n\n"
+            f"🌿 Pročitaj {pravila} i {chat}.\n\n"
+            f"💗 **Dobrodošao/la na party** — uzmi {chat}.\n"
+            "🎶 Klikni na **PLAY** i ukrasi profil!"
+        ),
+        color=_LP,
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(
+        text=f"{BOT_NAME} {VERSION} • {'TEST' if test else 'danas u ' + sada}"
+    )
+    return embed
+
+async def remember_welcome_message(
+    message: discord.Message,
+    member_id: int,
+    music_channel_id: int,
+    guild_id: int,
+    pozdrav_channel_id: int,
+):
+    """Sačuvaj i registruj personalizovano dugme da preživi restart."""
+    record = {
+        "member_id": member_id,
+        "music_channel_id": music_channel_id,
+        "guild_id": guild_id,
+        "pozdrav_channel_id": pozdrav_channel_id,
+    }
+    data = load_data()
+    messages = data.setdefault("welcome_messages", {})
+    messages[str(message.id)] = record
+    # Ograniči indeks da stari serveri ne gomilaju neograničene ID-jeve.
+    if len(messages) > 5000:
+        for old_id in list(messages)[: len(messages) - 5000]:
+            messages.pop(old_id, None)
+    save_data(data)
+    bot.add_view(
+        WelcomeView(member_id, music_channel_id, guild_id, pozdrav_channel_id),
+        message_id=message.id,
+    )
 
 class InfoView(discord.ui.View):
     """Dugmad za detaljne informacije o serveru."""
@@ -2195,6 +2248,19 @@ async def on_ready():
         bot.add_view(TicketCloseView())
         bot.add_view(ReportPanelView())
         bot.add_view(ReportCloseView())
+        for message_id, cfg in load_data().get("welcome_messages", {}).items():
+            try:
+                bot.add_view(
+                    WelcomeView(
+                        int(cfg["member_id"]),
+                        cfg.get("music_channel_id"),
+                        int(cfg["guild_id"]),
+                        cfg.get("pozdrav_channel_id"),
+                    ),
+                    message_id=int(message_id),
+                )
+            except (KeyError, TypeError, ValueError, discord.ClientException) as exc:
+                print(f"[WELCOME] Ne mogu obnoviti dugme na poruci {message_id}: {exc}")
         PERSISTENT_VIEWS_REGISTERED = True
     if MONIKA_GUESS_TASK is None or MONIKA_GUESS_TASK.done():
         MONIKA_GUESS_TASK = asyncio.create_task(monika_guess_loop())
@@ -2215,61 +2281,67 @@ async def on_ready():
     print(f"[{BOT_NAME} {VERSION}] Prijavljen kao {bot.user} ({bot.user.id})")
     print(f"[{BOT_NAME} {VERSION}] Prefix: '{BOT_PREFIX}' | Svi sistemi aktivni!")
     print(f"[{BOT_NAME} {VERSION}] Registrovano prefix komandi: {len(bot.commands)}")
+    print(
+        f"[{BOT_NAME}] Server Members Intent u kodu: {bot.intents.members}. "
+        "U Developer Portalu mora biti uključen i isti privileged intent."
+    )
 
 @bot.event
 async def on_member_join(member: discord.Member):
     """Šalje welcome poruku u kanal koji je admin podesio."""
+    print(f"[WELCOME] Novi član {member.id} na serveru {member.guild.id}.")
     data = load_data()
     cfg = get_welcome(data, member.guild.id)
     channel_id = cfg.get("channel_id")
     if not channel_id:
+        print(f"[WELCOME] Nema podešenog kanala za server {member.guild.id}.")
         return
 
     channel = member.guild.get_channel(channel_id)
-    if channel is None or not hasattr(channel, "send"):
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(channel_id)
+        except discord.HTTPException as exc:
+            channel = None
+            print(f"[WELCOME] Kanal {channel_id} nije dostupan: {exc}")
+
+    if isinstance(channel, discord.TextChannel) and channel.guild.id == member.guild.id:
+        try:
+            view = WelcomeView(
+                member.id,
+                cfg.get("music_channel_id"),
+                member.guild.id,
+                cfg.get("pozdrav_channel_id"),
+            )
+            welcome_message = await channel.send(
+                embed=build_welcome_embed(member, member.guild, cfg),
+                view=view,
+                allowed_mentions=discord.AllowedMentions(
+                    users=[member],
+                    roles=False,
+                    everyone=False,
+                ),
+            )
+            await remember_welcome_message(
+                welcome_message,
+                member.id,
+                cfg.get("music_channel_id"),
+                member.guild.id,
+                cfg.get("pozdrav_channel_id"),
+            )
+            print(f"[WELCOME] Poruka poslata u kanal {channel_id}.")
+        except discord.Forbidden:
+            print(
+                f"[WELCOME] Bot nema Send Messages/Embed Links dozvolu "
+                f"u kanalu {channel_id}."
+            )
+        except discord.HTTPException as exc:
+            print(f"[WELCOME] Slanje u kanal {channel_id} nije uspjelo: {exc}")
+    else:
         print(
-            f"[WELCOME] Kanal {channel_id} nije pronađen na serveru "
-            f"{member.guild.id}."
+            f"[WELCOME] Kanal {channel_id} nije pronađen ili nije tekstualni "
+            f"kanal servera {member.guild.id}."
         )
-        return
-
-    def mention(channel_key: str, fallback: str) -> str:
-        channel_value = cfg.get(channel_key)
-        return f"<#{channel_value}>" if channel_value else fallback
-
-    pravila = mention("pravila_channel_id", "#pravila")
-    chat = mention("chat_channel_id", "#chat")
-    music = mention("music_channel_id", "#music")
-    sada = datetime.now(timezone.utc).strftime("%H:%M")
-
-    embed = discord.Embed(
-        description=(
-            f"🌸 Dobrodošao/la {member.mention} na 🥂 **{member.guild.name}**! 🌿\n"
-            f"\n"
-            f"🌿 Pročitaj {pravila} i {chat}.\n"
-            f"\n"
-            f"💗 **Dobrodošao/la na party** — uzmi {chat}.\n"
-            f"🎶 Klikni na **PLAY** i ukrasi profil!"
-        ),
-        color=_LP,
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_footer(text=f"{BOT_NAME} {VERSION} • danas u {sada}")
-
-    view = WelcomeView(
-        member.id,
-        cfg.get("music_channel_id"),
-        member.guild.id,
-        cfg.get("pozdrav_channel_id"),
-    )
-    try:
-        await channel.send(embed=embed, view=view)
-    except discord.Forbidden:
-        print(f"[WELCOME] Bot nema dozvolu za slanje u kanal {channel_id}.")
-        return
-    except discord.HTTPException as e:
-        print(f"[WELCOME] Discord greška za kanal {channel_id}: {e}")
-        return
 
     role_id = cfg.get("role_id")
     if role_id:
@@ -2277,8 +2349,13 @@ async def on_member_join(member: discord.Member):
         if role:
             try:
                 await member.add_roles(role, reason="SQUAD welcome automatska uloga")
+                print(f"[WELCOME] Dodijeljena uloga {role_id} članu {member.id}.")
             except discord.Forbidden:
-                print(f"[WELCOME] Bot ne može dodijeliti ulogu {role_id}.")
+                print(f"[WELCOME] Bot nema Manage Roles ili je uloga {role_id} iznad bot-ove.")
+            except discord.HTTPException as exc:
+                print(f"[WELCOME] Dodjela uloge {role_id} nije uspjela: {exc}")
+        else:
+            print(f"[WELCOME] Podešena uloga {role_id} više ne postoji.")
 
 @bot.event
 async def on_command_error(ctx: commands.Context, error):
@@ -2468,6 +2545,20 @@ async def welcome_podesi(
             "Ova komanda se koristi samo na serveru.", ephemeral=True
         )
         return
+    bot_member = interaction.guild.me
+    if bot_member is None:
+        await interaction.response.send_message(
+            "Ne mogu provjeriti dozvole bota na ovom serveru.", ephemeral=True
+        )
+        return
+    channel_permissions = kanal.permissions_for(bot_member)
+    if not channel_permissions.send_messages or not channel_permissions.embed_links:
+        await interaction.response.send_message(
+            f"Bot nema dozvolu **Send Messages** i/ili **Embed Links** u {kanal.mention}. "
+            "Podešavanje nije sačuvano.",
+            ephemeral=True,
+        )
+        return
 
     data = load_data()
     cfg = get_welcome(data, interaction.guild.id)
@@ -2496,7 +2587,46 @@ async def welcome_podesi(
         f">\n"
         f"> ID-evi su sačuvani po serveru. Novi članovi će odmah dobijati welcome poruku."
     )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    welcome_view = WelcomeView(
+        interaction.user.id,
+        cfg.get("music_channel_id"),
+        interaction.guild.id,
+        cfg.get("pozdrav_channel_id"),
+    )
+    try:
+        preview_message = await kanal.send(
+            content="🧪 Test welcome poruka nakon podešavanja",
+            embed=build_welcome_embed(interaction.user, interaction.guild, cfg, test=True),
+            view=welcome_view,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        await remember_welcome_message(
+            preview_message,
+            interaction.user.id,
+            cfg.get("music_channel_id"),
+            interaction.guild.id,
+            cfg.get("pozdrav_channel_id"),
+        )
+    except discord.Forbidden:
+        await interaction.edit_original_response(
+            content=(
+                f"Podešavanja su sačuvana, ali bot ne može poslati test u {kanal.mention}. "
+                "Provjeri Send Messages i Embed Links."
+            )
+        )
+        return
+    except discord.HTTPException as exc:
+        await interaction.edit_original_response(
+            content=f"Podešavanja su sačuvana, ali test poruka nije poslata: {exc}"
+        )
+        return
+    await interaction.edit_original_response(
+        content=(
+            f"✅ Welcome je podešen za {kanal.mention} i test poruka je poslata. "
+            "Stvarne welcome poruke stižu kada novi član uđe na server."
+        )
+    )
 
 @bot.tree.command(name="welcome-status", description="[ADMIN] Prikaži trenutna welcome podešavanja")
 @app_commands.default_permissions(administrator=True)
@@ -2538,45 +2668,62 @@ async def welcome_test(interaction: discord.Interaction):
     cfg = get_welcome(data, interaction.guild.id)
     channel_id = cfg.get("channel_id")
     channel = interaction.guild.get_channel(channel_id) if channel_id else None
-    if channel is None or not hasattr(channel, "send"):
+    if channel is None and channel_id:
+        try:
+            channel = await bot.fetch_channel(channel_id)
+        except discord.HTTPException:
+            channel = None
+    if not isinstance(channel, discord.TextChannel) or channel.guild.id != interaction.guild.id:
         await interaction.response.send_message(
-            "Prvo podesi welcome kanal komandom `/welcome-podesi`.",
+            "Welcome kanal nije podešen ili više ne postoji. Pokreni `/welcome-podesi`.",
+            ephemeral=True,
+        )
+        return
+    bot_member = interaction.guild.me
+    if not bot_member:
+        await interaction.response.send_message(
+            "Ne mogu provjeriti dozvole bota na serveru.", ephemeral=True
+        )
+        return
+    permissions = channel.permissions_for(bot_member)
+    if not permissions.send_messages or not permissions.embed_links:
+        await interaction.response.send_message(
+            f"Bot nema Send Messages i/ili Embed Links dozvolu u {channel.mention}.",
             ephemeral=True,
         )
         return
 
-    def mention(channel_key: str, fallback: str) -> str:
-        value = cfg.get(channel_key)
-        return f"<#{value}>" if value else fallback
-
-    embed = discord.Embed(
-        description=(
-            f"🌸 Dobrodošao/la {interaction.user.mention} na 🥂 "
-            f"**{interaction.guild.name}**! 🌿\n"
-            f"\n"
-            f"🌿 Pročitaj {mention('pravila_channel_id', '#pravila')} i "
-            f"{mention('chat_channel_id', '#chat')}.\n"
-            f"\n"
-            f"💗 **Dobrodošao/la na party** — uzmi "
-            f"{mention('chat_channel_id', '#chat')}.\n"
-            f"🎶 Klikni na **PLAY** i ukrasi profil!"
-        ),
-        color=_LP,
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    view = WelcomeView(
+        interaction.user.id,
+        cfg.get("music_channel_id"),
+        interaction.guild.id,
+        cfg.get("pozdrav_channel_id"),
     )
-    embed.set_thumbnail(url=interaction.user.display_avatar.url)
-    embed.set_footer(text=f"{BOT_NAME} {VERSION} • TEST")
-    await interaction.response.send_message(
-        f"Test welcome poruka je poslata u {channel.mention}.", ephemeral=True
-    )
-    await channel.send(
-        content=f"🧪 Test welcome za {interaction.user.mention}",
-        embed=embed,
-        view=WelcomeView(
+    try:
+        preview_message = await channel.send(
+            content="🧪 Test welcome poruka",
+            embed=build_welcome_embed(interaction.user, interaction.guild, cfg, test=True),
+            view=view,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        await remember_welcome_message(
+            preview_message,
             interaction.user.id,
             cfg.get("music_channel_id"),
             interaction.guild.id,
             cfg.get("pozdrav_channel_id"),
-        ),
+        )
+    except discord.Forbidden:
+        await interaction.edit_original_response(
+            content=f"Discord je odbio slanje u {channel.mention}. Provjeri dozvole kanala."
+        )
+        return
+    except discord.HTTPException as exc:
+        await interaction.edit_original_response(content=f"Test welcome nije poslan: {exc}")
+        return
+    await interaction.edit_original_response(
+        content=f"✅ Test welcome poruka je poslata u {channel.mention}."
     )
 
 @bot.tree.command(name="welcome-iskljuci", description="[ADMIN] Isključi automatske welcome poruke")
@@ -5964,9 +6111,22 @@ async def giveaways(ctx: commands.Context):
 
 @bot.command(name="poruka")
 async def poruka(ctx: commands.Context, server_link: str = None):
-    """Vlasnik šalje personalizovanu dobrodošlicu svim članovima servera u DM."""
-    if not await bot.is_owner(ctx.author):
-        await ctx.send("Ovu komandu može koristiti samo vlasnik bota.", delete_after=8)
+    """Vlasnik bota ili servera šalje pozivnicu članovima servera u DM."""
+    if ctx.guild is None:
+        await ctx.send("Komandu `.poruka` pokreni u kanalu servera.", delete_after=8)
+        return
+
+    try:
+        is_bot_owner = await bot.is_owner(ctx.author)
+    except discord.HTTPException as exc:
+        is_bot_owner = False
+        print(f"[PORUKA] Provjera vlasnika bota nije uspjela: {exc}")
+    is_guild_owner = ctx.author.id == ctx.guild.owner_id
+    if not (is_bot_owner or is_guild_owner):
+        await ctx.send(
+            "Ovu komandu može koristiti vlasnik bota ili vlasnik ovog servera.",
+            delete_after=12,
+        )
         return
 
     if not server_link:
@@ -5977,10 +6137,14 @@ async def poruka(ctx: commands.Context, server_link: str = None):
         )
         return
 
+    server_link = server_link.strip().strip("<>")
+    if server_link.startswith("discord.gg/"):
+        server_link = f"https://{server_link}"
+
     # Dozvoli samo Discord invite link, da se u poruku ne ubaci pogrešan
     # ili neočekivan URL.
     if not re.match(
-        r"^https?://(?:www\.)?(?:discord\.gg|discord\.com/invite)/[A-Za-z0-9-]+/?$",
+        r"^https?://(?:www\.)?(?:discord\.gg|discord\.com/invite)/[A-Za-z0-9_-]+/?$",
         server_link,
         re.IGNORECASE,
     ):
@@ -5989,10 +6153,6 @@ async def poruka(ctx: commands.Context, server_link: str = None):
             "`https://discord.gg/tvoj-link`.",
             delete_after=12,
         )
-        return
-
-    if ctx.guild is None:
-        await ctx.send("Ova komanda se mora pokrenuti na serveru.", delete_after=8)
         return
 
     embed = discord.Embed(
@@ -6044,34 +6204,68 @@ async def poruka(ctx: commands.Context, server_link: str = None):
         ),
         inline=False,
     )
+    embed.add_field(
+        name="Ekonomija i kuća",
+        value=(
+            "> `.ekonomija` · `.rad` · `.plata` · `.novac` · `.banka`\n"
+            "> `.uplati <iznos>` · `.podigni <iznos>` · `.transfer @Korisnik <iznos>`\n"
+            "> `.market` · `.kupi <predmet>` · `.pokloni @Korisnik <predmet>`\n"
+            "> `.kuca` · `.stan` · `.soba` · `.kuhinja` · `.spavaca`\n"
+            "> `.kupatilo` · `.vrt` · `.bazen` · `.garaza` · `.namjestaj`"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Igre, ribolov i rang-liste",
+        value=(
+            "> `.casino coin <ulog>` · `.casino slot <ulog>` · `.counting 1`\n"
+            "> `.toplo-hladno` · `.kaladont` · `.pijte` · `.film` · `.istina` · `.izazov`\n"
+            "> `.pecanje` · `.ribnjak` · `.prodaj` · `.ribar`\n"
+            "> `.topljubav` · `.topxp` · `.topbogati` · `.topparovi` · `.topstanovi` · `.top-ribar`"
+        ),
+        inline=False,
+    )
     if ctx.guild.icon:
         embed.set_thumbnail(url=ctx.guild.icon.url)
     embed.set_footer(text=f"{BOT_NAME} {VERSION} • pozivnica")
 
+    status_message = await ctx.send(
+        f"Počinjem slati pozivnicu članovima servera **{ctx.guild.name}**..."
+    )
     poslato = 0
     preskoceno = 0
     greske = 0
-    for member in ctx.guild.members:
-        # Vlasnik više nije izuzet: tako se komanda može provjeriti i na
-        # vlastitom nalogu. Discord i dalje može odbiti DM ako je korisnik
-        # isključio privatne poruke.
-        if member.bot:
-            preskoceno += 1
-            continue
-        try:
-            await member.send(embed=embed)
-            poslato += 1
-            # Mali razmak smanjuje mogućnost Discord rate limita kod većih
-            # servera, a komanda i dalje nastavlja kroz sve članove.
-            await asyncio.sleep(0.15)
-        except (discord.Forbidden, discord.HTTPException):
-            greske += 1
+    ucitavanje_greska = None
+    try:
+        async for member in ctx.guild.fetch_members(limit=None):
+            if member.bot:
+                preskoceno += 1
+                continue
+            try:
+                await member.send(embed=embed)
+                poslato += 1
+            except (discord.Forbidden, discord.HTTPException):
+                greske += 1
+            # Drži slanje ispod Discordovog DM rate limita.
+            await asyncio.sleep(0.25)
+    except (discord.Forbidden, discord.HTTPException) as exc:
+        ucitavanje_greska = exc
+        print(f"[PORUKA] Učitavanje članova nije uspjelo: {exc}")
 
-    await ctx.send(
-        f"Poruka je završena. Poslato: **{poslato}**, "
-        f"preskočeno: **{preskoceno}**, nedostupni DM-ovi: **{greske}**.",
-        delete_after=20,
-    )
+    if ucitavanje_greska and poslato == 0 and preskoceno == 0:
+        final_text = (
+            "Nisam mogao učitati članove servera, pa poruka nije poslata. "
+            "U Discord Developer Portal uključi **Server Members Intent**, "
+            "sačuvaj promjenu i restartuj bota."
+        )
+    else:
+        final_text = (
+            f"Slanje završeno. Poslato: **{poslato}**, botovi preskočeni: "
+            f"**{preskoceno}**, privatne poruke nedostupne: **{greske}**."
+        )
+        if ucitavanje_greska:
+            final_text += " Učitavanje članova je prekinuto; dio članova možda nije obrađen."
+    await status_message.edit(content=final_text)
 
 @bot.tree.command(name="opis", description="[OWNER] Objavi kompletno uputstvo za korištenje bota")
 async def opis_slash(interaction: discord.Interaction):

@@ -109,6 +109,11 @@ Zatim provjeri izgled:
 /welcome-test
 ```
 
+`/welcome-podesi` odmah šalje test welcome embed u odabrani kanal. Prave welcome
+poruke šalju se pri ulasku novih članova; za to `Server Members Intent` mora biti
+uključen i u kodu i u Discord Developer Portalu. Test komanda prijavljuje dozvolu
+koja nedostaje ako bot ne može slati poruke ili embede.
+
 Pregled podešavanja:
 
 ```text
@@ -328,9 +333,10 @@ trenutnog servera:
 .poruka https://discord.gg/tvoj-link
 ```
 
-Poruka sadrži pozivni link, kratak opis servera i ljubavne komande. Botovi i
-vlasnik komande se preskaču, a članovi koji imaju zatvorene privatne poruke
-prikazuju se u završnom izvještaju kao nedostupni DM-ovi.
+Komandu može koristiti vlasnik bota ili vlasnik servera. Poruka sadrži pozivni
+link i pregled glavnih komandi. Botovi se preskaču, a članovi koji imaju
+zatvorene privatne poruke prikazuju se u završnom izvještaju. Ako je `/setlogin`
+podešen, `.poruka` se mora pokrenuti u tom komandnom kanalu.
 
 ### Ljubav i veze
 
