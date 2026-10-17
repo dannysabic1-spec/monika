@@ -103,6 +103,23 @@ CUSTOM_EMOJI = {
     "game":     "<:Gamepad2:1517941043780387057>",
 }
 
+# Custom emoji-ji koje je korisnik poslao za welcome poruke.
+# Ako neki od njih nije dostupan na serveru/aplikaciji, koristi se odgovarajući
+# već provjeren MONIKA emoji kao siguran fallback.
+WELCOME_EMOJI_DEFINITIONS = {
+    "love": ("60711imloved5", 1504507385039818842, "heart"),
+    "sparkles": ("55277bluesparkles", 1504507374050873535, "sparkles"),
+    "ghost": ("54987ghostblue", 1504507371014324264, "moon"),
+    "sharks": ("54927gummysharks", 1504507368912847040, "target"),
+    "mooncat": ("46394mooncatblue", 1504507328807047209, "moon"),
+    "crayon": ("42546bluecrayon", 1504507316282593361, "book"),
+    "fire": ("39236dumpsterfire", 1504507313011036432, "flame"),
+}
+WELCOME_EMOJI = {
+    key: CUSTOM_EMOJI[fallback_key]
+    for key, (_name, _emoji_id, fallback_key) in WELCOME_EMOJI_DEFINITIONS.items()
+}
+
 # Sigurne zamjene ako neki emoji još nije uploadovan u Developer Portalu.
 # Na ovaj način Discord nikad neće prikazati nevažeći tekst poput :Cloud:.
 EMOJI_FALLBACKS = {
@@ -162,6 +179,8 @@ EMOJI_CUSTOM_ALIASES = {
     "🥂": "gift", "🥇": "trophy", "🥈": "trophy", "🥉": "trophy",
     "🥗": "gift", "🥩": "gift", "🥰": "heart", "🧠": "info",
     "🧪": "info", "🧸": "gift", "🪑": "home", "🪴": "globe",
+    "🎲": "game", "🔢": "game", "🔤": "book", "🌡️": "target",
+    "❄️": "cloud", "🧊": "cloud", "⏳": "clock", "⭐": "sparkles",
 }
 
 # Potpuni sigurnosni filter za emoji-je koji nisu navedeni u mapama iznad.
@@ -205,6 +224,9 @@ async def load_application_emojis():
                 matched += 1
             else:
                 missing.append(f"{key} ({discord_name})")
+        for key, (emoji_name, _emoji_id, _fallback_key) in WELCOME_EMOJI_DEFINITIONS.items():
+            if emoji_name.lower() in by_name:
+                WELCOME_EMOJI[key] = by_name[emoji_name.lower()]
         APPLICATION_EMOJIS_LOADED = True
         if missing:
             print(
@@ -219,6 +241,15 @@ async def load_application_emojis():
         APPLICATION_EMOJIS_LOADED = True
         print(f"[{BOT_NAME}] Provjera emoji-ja nije uspjela; zadržavam svih "
               f"{len(CUSTOM_EMOJI)} upisanih ID-jeva: {exc}")
+
+def welcome_emoji(guild, key: str) -> str:
+    """Vrati welcome emoji iz servera/aplikacije ili sigurni MONIKA fallback."""
+    emoji_name, emoji_id, fallback_key = WELCOME_EMOJI_DEFINITIONS[key]
+    get_emoji = getattr(guild, "get_emoji", None)
+    server_emoji = get_emoji(emoji_id) if get_emoji else None
+    if server_emoji:
+        return str(server_emoji)
+    return WELCOME_EMOJI.get(key, CUSTOM_EMOJI[fallback_key])
 
 try:
     sys.stdout.reconfigure(line_buffering=True)
@@ -922,8 +953,35 @@ intents.reactions       = True
 
 bot = commands.Bot(command_prefix=BOT_PREFIX, intents=intents, help_command=None)
 
+# Zaštiti slash komande od ponovne obrade istog Discord interaction ID-a.
+PROCESSED_SLASH_INTERACTIONS = {}
+SLASH_INTERACTION_DEDUP_SECONDS = 900
+
 async def _tree_login_check(interaction: discord.Interaction) -> bool:
     """Primijeni /setlogin i na slash komande, uz izuzetke za podešavanje."""
+    now = asyncio.get_running_loop().time()
+    previous = PROCESSED_SLASH_INTERACTIONS.get(interaction.id)
+    if previous is not None and now - previous < SLASH_INTERACTION_DEDUP_SECONDS:
+        return False
+
+    PROCESSED_SLASH_INTERACTIONS[interaction.id] = now
+    if len(PROCESSED_SLASH_INTERACTIONS) > 10000:
+        cutoff = now - SLASH_INTERACTION_DEDUP_SECONDS
+        expired = [
+            interaction_id
+            for interaction_id, seen_at in PROCESSED_SLASH_INTERACTIONS.items()
+            if seen_at < cutoff
+        ]
+        for interaction_id in expired:
+            PROCESSED_SLASH_INTERACTIONS.pop(interaction_id, None)
+        if len(PROCESSED_SLASH_INTERACTIONS) > 10000:
+            oldest = sorted(
+                PROCESSED_SLASH_INTERACTIONS,
+                key=PROCESSED_SLASH_INTERACTIONS.get,
+            )[: len(PROCESSED_SLASH_INTERACTIONS) - 8000]
+            for interaction_id in oldest:
+                PROCESSED_SLASH_INTERACTIONS.pop(interaction_id, None)
+
     if not interaction.guild or not interaction.channel:
         return True
     command_name = getattr(getattr(interaction, "command", None), "name", "")
@@ -1057,13 +1115,16 @@ class WelcomeView(discord.ui.View):
                 output_channel = configured_channel
 
         if output_channel:
+            love = welcome_emoji(interaction.guild, "love")
+            sparkles = welcome_emoji(interaction.guild, "sparkles")
+            sharks = welcome_emoji(interaction.guild, "sharks")
             embed = discord.Embed(
-                title="🌹 Dobrodošlica je poslata!",
+                title=f"{sparkles} Dobrodošlica je poslata!",
                 description=(
-                    f"> 🌹 {interaction.user.mention} je poslao/la "
-                    f"dobrodošlicu {target_mention} na **{guild_name}**! 🌿\n"
+                    f"> {love} {interaction.user.mention} je poslao/la "
+                    f"dobrodošlicu {target_mention} na **{guild_name}**!\n"
                     f">\n"
-                    f"> Prva osoba koja je kliknula dugme poželjela je dobrodošlicu "
+                    f"> {sharks} Prva osoba koja je kliknula dugme poželjela je dobrodošlicu "
                     f"novom članu."
                 ),
                 color=_LP,
@@ -1079,17 +1140,41 @@ def build_welcome_embed(member, guild: discord.Guild, cfg: dict, test: bool = Fa
         channel_id = cfg.get(channel_key)
         return f"<#{channel_id}>" if channel_id else fallback
 
+    def emoji(key: str) -> str:
+        return welcome_emoji(guild, key)
+
     pravila = mention("pravila_channel_id", "#pravila")
     chat = mention("chat_channel_id", "#chat")
+    music = mention("music_channel_id", "nije podešen")
     sada = datetime.now(timezone.utc).strftime("%H:%M")
     embed = discord.Embed(
+        title=f"{emoji('sparkles')} Dobrodošao/la na {guild.name}!",
         description=(
-            f"🌸 Dobrodošao/la {member.mention} na 🥂 **{guild.name}**! 🌿\n\n"
-            f"🌿 Pročitaj {pravila} i {chat}.\n\n"
-            f"💗 **Dobrodošao/la na party** — uzmi {chat}.\n"
-            "🎶 Klikni na **PLAY** i ukrasi profil!"
+            f"{emoji('love')} {member.mention}, dobrodošao/la na "
+            f"**{guild.name}**!\n\n"
+            f"{emoji('fire')} Lijepo se smjesti, upoznaj ekipu i uživaj!"
         ),
         color=_LP,
+    )
+    embed.add_field(
+        name=f"{emoji('ghost')} Pravila",
+        value=f"Prije početka pročitaj {pravila}.",
+        inline=True,
+    )
+    embed.add_field(
+        name=f"{emoji('sharks')} Chat",
+        value=f"Druži se sa članovima u {chat}.",
+        inline=True,
+    )
+    embed.add_field(
+        name=f"{emoji('mooncat')} Muzika",
+        value=f"Pronađi muziku u {music}.",
+        inline=True,
+    )
+    embed.add_field(
+        name=f"{emoji('crayon')} Počni ovdje",
+        value="Klikni na dugme **play music** ispod i istraži server.",
+        inline=False,
     )
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.set_footer(
@@ -2221,20 +2306,29 @@ async def on_message(message: discord.Message):
             configured_game_channels = get_kanali(load_data(), message.guild.id)
         if (
             configured_game_channels.get("toplo_hladno") == channel_id
-            and raw.isdigit()
         ):
-            await toplo_hladno.callback(ctx, int(raw))
+            if raw.isdigit():
+                await toplo_hladno.callback(ctx, int(raw))
+            elif raw:
+                await react_to_game_input(
+                    message,
+                    "Pošalji broj od 1 do 100 za igru Toplo-hladno.",
+                )
             return
         if (
             configured_game_channels.get("counting") == channel_id
-            and raw.isdigit()
         ):
-            await counting.callback(ctx, int(raw))
+            if raw.isdigit():
+                await counting.callback(ctx, int(raw))
+            elif raw:
+                await react_to_game_input(
+                    message,
+                    "Brojanje prima samo sljedeći broj.",
+                )
             return
         if (
             configured_game_channels.get("kaladont") == channel_id
-            and raw.isalpha()
-            and len(raw) >= 2
+            and raw
         ):
             await kaladont.callback(ctx, raw)
             return
@@ -2242,6 +2336,13 @@ async def on_message(message: discord.Message):
             parts = raw.split()
             if len(parts) == 2 and parts[0].lower() in {"coin", "slot"} and parts[1].isdigit():
                 await casino.callback(ctx, parts[0], int(parts[1]))
+                return
+            if raw:
+                await react_to_game_input(
+                    message,
+                    "Za casino koristi `coin 50` ili `slot 50`.",
+                    "🎰",
+                )
                 return
         # Brojevi u Monikinom kanalu prvo pripadaju njenom izazovu.
         if message.guild:
@@ -2639,16 +2740,20 @@ async def welcome_podesi(
     pozdrav_txt = pozdrav.mention if pozdrav else "welcome kanal"
     role_txt = uloga.mention if uloga else "nije podešena"
 
-    embed = discord.Embed(title="✅ Welcome podešavanja sačuvana", color=_LP)
+    e = lambda key: welcome_emoji(interaction.guild, key)
+    embed = discord.Embed(
+        title=f"{e('sparkles')} Welcome podešavanja sačuvana",
+        color=_LP,
+    )
     embed.description = (
-        f"> **Welcome kanal:** {kanal.mention}\n"
-        f"> **Pravila:** {pravila_txt}\n"
-        f"> **Chat:** {chat_txt}\n"
-        f"> **Music:** {music_txt}\n"
-        f"> **Poruka dobrodošlice:** {pozdrav_txt}\n"
-        f"> **Automatska uloga:** {role_txt}\n"
+        f"> {e('love')} **Welcome kanal:** {kanal.mention}\n"
+        f"> {e('ghost')} **Pravila:** {pravila_txt}\n"
+        f"> {e('sharks')} **Chat:** {chat_txt}\n"
+        f"> {e('mooncat')} **Music:** {music_txt}\n"
+        f"> {e('crayon')} **Poruka dobrodošlice:** {pozdrav_txt}\n"
+        f"> {e('fire')} **Automatska uloga:** {role_txt}\n"
         f">\n"
-        f"> ID-evi su sačuvani po serveru. Novi članovi će odmah dobijati welcome poruku."
+        f"> {e('sparkles')} ID-evi su sačuvani po serveru. Novi članovi će odmah dobijati welcome poruku."
     )
     await interaction.response.defer(ephemeral=True, thinking=True)
     welcome_view = WelcomeView(
@@ -2707,14 +2812,15 @@ async def welcome_status(interaction: discord.Interaction):
         return f"<#{channel_id}>" if channel_id else "nije podešen"
 
     role = interaction.guild.get_role(cfg.get("role_id")) if cfg.get("role_id") else None
-    embed = discord.Embed(title="⚙️ Welcome status", color=_LP)
+    e = lambda key: welcome_emoji(interaction.guild, key)
+    embed = discord.Embed(title=f"{e('sparkles')} Welcome status", color=_LP)
     embed.description = (
-        f"> **Welcome kanal:** {mention(cfg.get('channel_id'))}\n"
-        f"> **Pravila:** {mention(cfg.get('pravila_channel_id'))}\n"
-        f"> **Chat:** {mention(cfg.get('chat_channel_id'))}\n"
-        f"> **Music:** {mention(cfg.get('music_channel_id'))}\n"
-        f"> **Poruka dobrodošlice:** {mention(cfg.get('pozdrav_channel_id'))}\n"
-        f"> **Automatska uloga:** {role.mention if role else 'nije podešena'}"
+        f"> {e('love')} **Welcome kanal:** {mention(cfg.get('channel_id'))}\n"
+        f"> {e('ghost')} **Pravila:** {mention(cfg.get('pravila_channel_id'))}\n"
+        f"> {e('sharks')} **Chat:** {mention(cfg.get('chat_channel_id'))}\n"
+        f"> {e('mooncat')} **Music:** {mention(cfg.get('music_channel_id'))}\n"
+        f"> {e('crayon')} **Poruka dobrodošlice:** {mention(cfg.get('pozdrav_channel_id'))}\n"
+        f"> {e('fire')} **Automatska uloga:** {role.mention if role else 'nije podešena'}"
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -5947,10 +6053,20 @@ COUNTING_LOCKS = {}
 HOT_COLD_GAMES = {}
 PROCESSED_GAME_MESSAGE_IDS = set()
 KALADONT_STICKER_FILES = (
+    "game_sticker_kaladont.png",
     "kaladont_sticker_1.jpg",
     "kaladont_sticker_2.jpg",
 )
-KALADONT_STICKER_ROTATION = {}
+GAME_STICKER_FILES = {
+    "counting": ("game_sticker_counting.png", "game_sticker_trophy.png"),
+    "toplo_hladno": (
+        "game_sticker_toplo_hladno.png",
+        "game_sticker_kaladont.png",
+    ),
+    "kaladont": KALADONT_STICKER_FILES,
+    "casino": ("game_sticker_casino.png", "game_sticker_trophy.png"),
+}
+GAME_STICKER_ROTATION = {}
 
 def game_embed(title: str, lines, footer: str = None):
     e = discord.Embed(title=title, color=_LP)
@@ -5959,30 +6075,77 @@ def game_embed(title: str, lines, footer: str = None):
         e.set_footer(text=footer)
     return e
 
-async def send_kaladont_embed(ctx: commands.Context, embed: discord.Embed):
-    """Pošalji Kaladont embed sa naizmjeničnom slikom iz paketa."""
-    channel_key = f"{ctx.guild.id if ctx.guild else 0}:{ctx.channel.id}"
-    image_index = KALADONT_STICKER_ROTATION.get(channel_key, 0)
-    filename = KALADONT_STICKER_FILES[image_index]
-    image_path = os.path.join(DATA_DIR, filename)
-    if not os.path.isfile(image_path):
-        print(f"[KALADONT] Nedostaje slika {filename}; šaljem embed bez nje.")
+async def react_to_game_input(
+    message: discord.Message,
+    reply_text: str,
+    emoji: str = "🔢",
+):
+    """Daj kratku emoji potvrdu za tekst u igri koja prima samo brojeve."""
+    try:
+        await message.add_reaction(emoji)
+    except discord.Forbidden:
+        try:
+            await message.reply(
+                reply_text,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except discord.HTTPException as exc:
+            print(f"[IGRE] Nije moguće odgovoriti na poruku {message.id}: {exc}")
+    except discord.HTTPException as exc:
+        # Ne šalji drugi odgovor nakon neizvjesne greške; Discord je možda
+        # već prihvatio reakciju prije prekida veze.
+        print(f"[IGRE] Reakcija nije potvrđena za poruku {message.id}: {exc}")
+
+async def send_game_embed(
+    ctx: commands.Context,
+    embed: discord.Embed,
+    game: str,
+    *,
+    reply: bool = False,
+):
+    """Pošalji jedan embed sa odgovarajućim stikerom za mini-igru."""
+    filenames = GAME_STICKER_FILES.get(game, ())
+    channel_key = f"{ctx.guild.id if ctx.guild else 0}:{ctx.channel.id}:{game}"
+    image_index = GAME_STICKER_ROTATION.get(channel_key, 0)
+    filename = filenames[image_index % len(filenames)] if filenames else None
+    image_path = os.path.join(DATA_DIR, filename) if filename else None
+
+    if image_path and os.path.isfile(image_path):
+        embed.set_thumbnail(url=f"attachment://{filename}")
+        file = discord.File(image_path, filename=filename)
+        if reply and ctx.message:
+            await ctx.reply(
+                embed=embed,
+                file=file,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        else:
+            await ctx.send(
+                embed=embed,
+                file=file,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        GAME_STICKER_ROTATION[channel_key] = (image_index + 1) % len(filenames)
+        return
+
+    print(f"[IGRE] Nedostaje stiker za igru {game}: {filename or 'nije podešen'}")
+    if reply and ctx.message:
+        await ctx.reply(
+            embed=embed,
+            mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    else:
         await ctx.send(
             embed=embed,
             allowed_mentions=discord.AllowedMentions.none(),
         )
-        return
 
-    embed.set_thumbnail(url=f"attachment://{filename}")
-    image_file = discord.File(image_path, filename=filename)
-    await ctx.send(
-        embed=embed,
-        file=image_file,
-        allowed_mentions=discord.AllowedMentions.none(),
-    )
-    KALADONT_STICKER_ROTATION[channel_key] = (
-        image_index + 1
-    ) % len(KALADONT_STICKER_FILES)
+async def send_kaladont_embed(ctx: commands.Context, embed: discord.Embed):
+    """Odgovori na riječ stikerom i embedom, uz samo jedno Discord slanje."""
+    await send_game_embed(ctx, embed, "kaladont", reply=True)
 
 def counting_embed(number: int, next_number: int = None, author_mention: str = None, error: str = None):
     """Embed za brojanje u stilu Discord reply kartice iz korisničkog primjera."""
@@ -6001,14 +6164,10 @@ def counting_embed(number: int, next_number: int = None, author_mention: str = N
 async def send_counting_reply(ctx: commands.Context, embed: discord.Embed):
     """Odgovori direktno na poruku s brojem, umjesto slanja nepovezane poruke."""
     try:
-        await ctx.reply(
-            embed=embed,
-            mention_author=False,
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
+        await send_game_embed(ctx, embed, "counting", reply=True)
     except discord.HTTPException as exc:
-        print(f"[COUNTING] Reply nije uspio u kanalu {ctx.channel.id}: {exc}")
-        await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        # Ne pokušavaj drugo slanje: prvi odgovor je možda već stigao do Discorda.
+        print(f"[COUNTING] Jedini reply nije uspio u kanalu {ctx.channel.id}: {exc}")
 
 @bot.command(name="ekonomija")
 async def ekonomija_igra(ctx: commands.Context):
@@ -6036,7 +6195,7 @@ async def casino(ctx: commands.Context, igra: str = None, iznos: int = None):
     if not await check_kanal(ctx, "casino"):
         return
     if not igra:
-        await ctx.send(embed=game_embed(
+        await send_game_embed(ctx, game_embed(
             "🎰 Casino",
             [
                 "> Dobrodošao/la u casino!",
@@ -6046,20 +6205,40 @@ async def casino(ctx: commands.Context, igra: str = None, iznos: int = None):
                 "> Minimalni ulog: **10** novčića.",
             ],
             "Sretno!",
-        ))
+        ), "casino")
         return
     igra = igra.lower()
     if igra not in {"coin", "slot"}:
-        await ctx.send(embed=game_embed("🎰 Casino", ["> Izaberi `coin` ili `slot`."], "Koristi .casino"))
+        await send_game_embed(
+            ctx,
+            game_embed("🎰 Casino", ["> ❌ Izaberi `coin` ili `slot`."], "Koristi .casino"),
+            "casino",
+        )
         return
     if iznos is None or iznos < 10:
-        await ctx.send(embed=game_embed("🎰 Casino", ["> Upiši ulog od najmanje **10** novčića."], "Primjer: .casino coin 50"))
+        await send_game_embed(
+            ctx,
+            game_embed(
+                "🎰 Casino",
+                ["> ❌ Upiši ulog od najmanje **10** novčića."],
+                "Primjer: .casino coin 50",
+            ),
+            "casino",
+        )
         return
     data = load_data()
     wallet = get_ekonomija(data, ctx.author.id)
     novac = wallet.get("novac", 0)
     if iznos > novac:
-        await ctx.send(embed=game_embed("🎰 Casino", [f"> Nemaš dovoljno novca. Imaš **{novac:,}** novčića."], "Uplati ili zaradi novac"))
+        await send_game_embed(
+            ctx,
+            game_embed(
+                "🎰 Casino",
+                [f"> ❌ Nemaš dovoljno novca. Imaš **{novac:,}** novčića."],
+                "Uplati ili zaradi novac",
+            ),
+            "casino",
+        )
         return
     wallet["novac"] -= iznos
     if igra == "coin":
@@ -6074,11 +6253,19 @@ async def casino(ctx: commands.Context, igra: str = None, iznos: int = None):
     wallet["novac"] += dobitak
     save_data(data)
     neto = dobitak - iznos
-    await ctx.send(embed=game_embed(
-        "🎰 Casino",
-        [f"> {rezultat}", f"> {'✅ Dobitak' if dobitak else '❌ Nema dobitka'}: **{dobitak:,}**", f"> Rezultat: **{'+' if neto >= 0 else ''}{neto:,}** novčića"],
-        f"Stanje: {wallet['novac']:,}",
-    ))
+    await send_game_embed(
+        ctx,
+        game_embed(
+            "🎰 Casino",
+            [
+                f"> {rezultat}",
+                f"> {'✅ Dobitak' if dobitak else '❌ Nema dobitka'}: **{dobitak:,}**",
+                f"> Rezultat: **{'+' if neto >= 0 else ''}{neto:,}** novčića",
+            ],
+            f"Stanje: {wallet['novac']:,}",
+        ),
+        "casino",
+    )
 
 @bot.command(name="counting")
 async def counting(ctx: commands.Context, broj: int = None):
@@ -6101,15 +6288,17 @@ async def counting(ctx: commands.Context, broj: int = None):
             state = counting_data[game_key] = {"next": 1, "last_user_id": None}
         expected = max(1, int(state.get("next", 1) or 1))
     if broj is None:
-        await ctx.send(
-            embed=discord.Embed(
+        await send_game_embed(
+            ctx,
+            discord.Embed(
                 description=(
                     f"> 🔢 Sljedeći broj je **{expected}**.\n>\n"
                     "Pošalji samo broj u counting kanalu ili koristi "
                     "`.counting <broj>`."
                 ),
                 color=_LP,
-            )
+            ),
+            "counting",
         )
         return
     async with lock:
@@ -6164,28 +6353,62 @@ async def toplo_hladno(ctx: commands.Context, pogodak: int = None):
     channel_id = ctx.channel.id
     if pogodak is None:
         HOT_COLD_GAMES[channel_id] = random.randint(1, 100)
-        await ctx.send(embed=game_embed(
-            "🌡️ Toplo-hladno",
-            ["> Zamislio/la sam broj od **1 do 100**.", "> Pogodi ga komandom `.toplo-hladno <broj>`."],
-            "Nova runda je počela",
-        ))
+        await send_game_embed(
+            ctx,
+            game_embed(
+                "🌡️ Toplo-hladno",
+                [
+                    "> 🎯 Zamislio/la sam broj od **1 do 100**.",
+                    "> Pošalji samo broj u kanalu ili koristi `.toplo-hladno <broj>`.",
+                ],
+                "Nova runda je počela",
+            ),
+            "toplo_hladno",
+        )
         return
     if not 1 <= pogodak <= 100:
-        await ctx.send(embed=game_embed("🌡️ Toplo-hladno", ["> Broj mora biti između **1 i 100**."], "Pokušaj ponovo"))
+        await send_game_embed(
+            ctx,
+            game_embed(
+                "🌡️ Toplo-hladno",
+                ["> ❌ Broj mora biti između **1 i 100**."],
+                "Pokušaj ponovo",
+            ),
+            "toplo_hladno",
+        )
         return
     target = HOT_COLD_GAMES.setdefault(channel_id, random.randint(1, 100))
     if pogodak == target:
         HOT_COLD_GAMES.pop(channel_id, None)
-        await ctx.send(embed=game_embed("🌡️ Toplo-hladno", [f"> 🎉 Tačan pogodak: **{target}**!", "> Nova runda počinje sa `.toplo-hladno`."], "Čestitamo!"))
+        await send_game_embed(
+            ctx,
+            game_embed(
+                "🌡️ Toplo-hladno",
+                [
+                    f"> 🎉 Tačan pogodak: **{target}**!",
+                    "> Nova runda počinje sa `.toplo-hladno`.",
+                ],
+                "Čestitamo!",
+            ),
+            "toplo_hladno",
+        )
         return
     razlika = abs(target - pogodak)
     temperatura = "🔥 VRELO" if razlika <= 5 else "🌡️ Toplo" if razlika <= 15 else "❄️ Hladno"
     smjer = "veći" if pogodak < target else "manji"
-    await ctx.send(embed=game_embed(
-        "🌡️ Toplo-hladno",
-        [f"> Tvoj broj: **{pogodak}**", f"> {temperatura}", f"> Probaj broj koji je **{smjer}**."],
-        "Runda je aktivna",
-    ))
+    await send_game_embed(
+        ctx,
+        game_embed(
+            "🌡️ Toplo-hladno",
+            [
+                f"> 🎯 Tvoj broj: **{pogodak}**",
+                f"> {temperatura}",
+                f"> Pokušaj ponovo sa brojem koji je **{smjer}**.",
+            ],
+            "Runda je aktivna",
+        ),
+        "toplo_hladno",
+    )
 
 @bot.command(name="kaladont")
 async def kaladont(ctx: commands.Context, rijec: str = None):
@@ -6209,14 +6432,14 @@ async def kaladont(ctx: commands.Context, rijec: str = None):
     if len(rijec) < 2 or not rijec.isalpha():
         await send_kaladont_embed(ctx, game_embed(
             "🔤 Kaladont",
-            ["> Riječ mora sadržati samo slova i imati najmanje 2 slova."],
+            ["> ❌ Riječ mora sadržati samo slova i imati najmanje 2 slova."],
             "Primjer: .kaladont more",
         ))
         return
     if not is_known_bhs_word(rijec):
         await send_kaladont_embed(ctx, game_embed(
             "🔤 Kaladont",
-            [f"> Riječ **{rijec.upper()}** nije pronađena u B/H/S rječniku.",
+            [f"> ❌ Riječ **{rijec.upper()}** nije pronađena u B/H/S rječniku.",
              "> Unesi stvarnu riječ, bez izmišljanja slova."],
             "Riječ nije prihvaćena",
         ))
@@ -6228,7 +6451,7 @@ async def kaladont(ctx: commands.Context, rijec: str = None):
     if game.get("last") and game.get("last_author_id") == ctx.author.id:
         await send_kaladont_embed(ctx, game_embed(
             "🔤 Kaladont",
-            [f"> {ctx.author.mention}, sačekaj da drugi član pošalje riječ.",
+            [f"> ⏳ {ctx.author.mention}, sačekaj da drugi član pošalje riječ.",
              "> Isti igrač ne može igrati dva puta zaredom."],
             "Red je na drugom igraču",
         ))
@@ -6236,14 +6459,14 @@ async def kaladont(ctx: commands.Context, rijec: str = None):
     if rijec in game["used"]:
         await send_kaladont_embed(ctx, game_embed(
             "🔤 Kaladont",
-            [f"> {ctx.author.mention}, ta riječ je već iskorištena."],
+            [f"> ❌ {ctx.author.mention}, ta riječ je već iskorištena."],
             "Probaj drugu riječ",
         ))
         return
     if game["last"] and not rijec.startswith(game["last"][-2:]):
         await send_kaladont_embed(ctx, game_embed(
             "🔤 Kaladont",
-            [f"> Riječ mora početi sa **{game['last'][-2:].upper()}**."],
+            [f"> ❌ Riječ mora početi sa **{game['last'][-2:].upper()}**."],
             "Kaladont pravilo",
         ))
         return
@@ -6771,17 +6994,24 @@ async def komande_slash(interaction: discord.Interaction):
 
 @bot.tree.command(name="igre", description="Pregled mini-igara")
 async def igre_slash(interaction: discord.Interaction):
+    filename = "game_sticker_counting.png"
+    image_path = os.path.join(DATA_DIR, filename)
     e = game_embed(
         "🎮 Mini-igre",
         [
-            "> `.casino coin 50` ili `.casino slot 50`",
-            "> `.counting 1` — zatim članovi mogu slati samo brojeve",
-            "> `.toplo-hladno` — zatim članovi mogu slati samo brojeve",
-            "> `.kaladont` — zatim članovi mogu slati samo riječi",
+            "> `.casino coin 50` ili `.casino slot 50` — drugi tekst dobija 🎰 reakciju",
+            "> `.counting 1` — zatim šalji brojeve; tekst dobija 🔢 reakciju",
+            "> `.toplo-hladno` — šalji brojeve 1–100; tekst dobija 🔢 reakciju",
+            "> `.kaladont` — zatim šalji riječi direktno u kanal",
         ],
         "Prefix svih igara: .",
     )
-    await interaction.response.send_message(embed=e)
+    e.set_thumbnail(url=f"attachment://{filename}")
+    await interaction.response.send_message(
+        embed=e,
+        file=discord.File(image_path, filename=filename),
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
 
 # ══════════════════════════════════════════════
 #              POKRETANJE — Auto-reconnect

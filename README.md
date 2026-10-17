@@ -119,6 +119,9 @@ Zatim provjeri izgled:
 poruke šalju se pri ulasku novih članova; za to `Server Members Intent` mora biti
 uključen i u kodu i u Discord Developer Portalu. Test komanda prijavljuje dozvolu
 koja nedostaje ako bot ne može slati poruke ili embede.
+Welcome poruke, test i welcome status koriste sedam dostavljenih custom emoji-ja.
+Bot ih prvo traži među emoji-jima servera/aplikacije i koristi postojeće MONIKA
+emoji-je kao fallback ako neki od njih nije dostupan.
 
 Pregled podešavanja:
 
@@ -424,18 +427,19 @@ Stanje svake igre je odvojeno po Discord kanalu. Counting prikazuje prihvaćeni
 broj, sljedeći broj i tagovanog člana u tamnom embed-u, kao odgovor na poruku s brojem.
 Ne možeš brojati dva broja zaredom; pogrešan broj ili isti član resetuju rundu
 na 1. Broj i posljednji član čuvaju se u `ljubav_data.json` i preživljavaju
-restart. Ostali odgovori mini-igara koriste kompaktni embed stil.
+restart. Odgovori igara prikazuju odgovarajući stiker i emoji oznaku.
 
-Kaladont taguje člana, ispisuje riječi velikim slovima i uz odgovore naizmjenično
-prikazuje dvije ugrađene slike iz ZIP paketa.
+Kaladont odgovara direktno na svaku poruku u svom kanalu, provjerava riječ,
+taguje člana i ispisuje riječi velikim slovima. Stikeri iz priloženog lista
+su izrezani i ugrađeni u odgovore igara; welcome embedovi nisu mijenjani.
 
 U podešenim kanalima za `counting`, `toplo-hladno`, `kaladont` ili
 `casino` moguće je slati i skraćeni unos bez prefixa:
 
-- `counting` — pošalji samo `1`, `2`, `3`...
-- `toplo-hladno` — prvo pokreni `.toplo-hladno`, zatim šalji samo `44`, `55`...
-- `kaladont` — prvo pokreni `.kaladont`, zatim šalji samo riječi
-- `casino` — pošalji `coin 50` ili `slot 50`
+- `counting` — pošalji samo `1`, `2`, `3`...; tekst dobija 🔢 reakciju
+- `toplo-hladno` — prvo pokreni `.toplo-hladno`, zatim šalji brojeve `44`, `55`...; tekst dobija 🔢 reakciju
+- `kaladont` — prvo pokreni `.kaladont`, zatim šalji riječi direktno u kanal
+- `casino` — pošalji `coin 50` ili `slot 50`; ostali unosi dobijaju 🎰 reakciju
 
 Slash komande `/komande` i `/igre` se automatski registruju nakon pokretanja
 bota i prikazuju pregled prefix komandi i mini-igara.
@@ -456,7 +460,8 @@ Kada se runda pokrene prefix komandom, nastavak se šalje kao obična poruka:
 
 Bot odgovara najviše jednom na jednu Discord poruku. Ako se ista poruka
 ipak pojavi dva puta, provjeri da nije pokrenut drugi primjerak bota u
-drugom Replit procesu.
+drugom Replit procesu. Brojanje više ne pokušava drugo slanje ako Discord vrati
+grešku na prvom reply-u, da ne bi napravio dupli odgovor.
 
 Counting odgovor se prikazuje kao Discord reply na poruku člana. Za početak
 runde šalje se `1`; zatim drugi član šalje `2`, pa naredni `3`. Nagrade u
