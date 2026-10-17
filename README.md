@@ -1,4 +1,4 @@
-# MONIKA BOT Discord Bot
+# MONIKA BOT Discord Bot — v4.3
 
 Ovo je kompletan Discord bot sa ljubavnim sistemom, virtuelnom ekonomijom,
 kućama za parove, ribolovom, rang-listama, welcome panelom i Info/GWS & Events
@@ -134,8 +134,8 @@ Welcome dugme radi ovako:
 - iskorišteni klikovi se čuvaju u `ljubav_data.json`
 
 Ako korisnik ima zatvorene privatne poruke, Discord ne dozvoljava botu da ih
-otvori. U tom slučaju `.pomoc` prikazuje pomoć u kanalu, a `.poruka` na kraju
-prikaže broj nedostupnih DM-ova.
+otvori. U tom slučaju `.pomoc` prikazuje pomoć u kanalu, a `.poruka` u završnom
+izvještaju odvojeno prikazuje Discord odbijene DM-ove i druge HTTP greške.
 
 ## 5. Podešavanje Info/GWS & Events panela
 
@@ -393,13 +393,15 @@ Prefix svih komandi je tačka (`.`):
 
 - `.ekonomija` — pregled gotovine, banke i ekonomskih komandi
 - `.casino` — `coin` ili `slot`, minimalni ulog je 10 novčića
-- `.counting 1` — zajedničko brojanje po kanalu
+- `.counting 1` — brojanje po kanalu; bot odgovara direktno na poruku s brojem
 - `.toplo-hladno` — pogodi broj od 1 do 100
 - `.kaladont` — riječ mora početi sa posljednja dva slova prethodne riječi
 
-Stanje svake igre je odvojeno po Discord kanalu. Svi odgovori mini-igara
-koriste isti kompaktni embed stil: naslov u tekstu, ikonu, blockquote i
-separator bez usamljenog znaka `>`.
+Stanje svake igre je odvojeno po Discord kanalu. Counting prikazuje prihvaćeni
+broj, sljedeći broj i ime člana u tamnom embed-u, kao odgovor na poruku s brojem.
+Ne možeš brojati dva broja zaredom; pogrešan broj ili isti član resetuju rundu
+na 1. Broj i posljednji član čuvaju se u `ljubav_data.json` i preživljavaju
+restart. Ostali odgovori mini-igara koriste kompaktni embed stil.
 
 U podešenim kanalima za `counting`, `toplo-hladno`, `kaladont` ili
 `casino` moguće je slati i skraćeni unos bez prefixa:
@@ -429,6 +431,10 @@ Kada se runda pokrene prefix komandom, nastavak se šalje kao obična poruka:
 Bot odgovara najviše jednom na jednu Discord poruku. Ako se ista poruka
 ipak pojavi dva puta, provjeri da nije pokrenut drugi primjerak bota u
 drugom Replit procesu.
+
+Counting odgovor se prikazuje kao Discord reply na poruku člana. Za početak
+runde šalje se `1`; zatim drugi član šalje `2`, pa naredni `3`. Nagrade u
+novčićima i dalje se dodjeljuju za svaki tačan broj.
 
 ### Pokloni
 
@@ -512,7 +518,7 @@ ljubav_data.json
 
 U njemu se čuvaju veze, brakovi, djeca, XP, novac, bankovni račun,
 inventar, kuće, ribolov, podešeni kanali, Info panel i iskorištene welcome
-poruke.
+poruke, kao i stanje counting igara.
 
 Redovno napravi backup tog fajla.
 
@@ -532,6 +538,8 @@ Provjereno:
 - nema stvarnih GIF fajlova ili GIF URL-ova u projektu
 - `/setreport`, `/setpomoc` i `/setlogin` vidljive su bot-vlasniku i server administratorima
 - pri pokretanju se ispisuje stvarni rezultat slash komandi sinhronizovanih sa Discordom
+- dugmad panelâ koriste sigurne Unicode ikone, kako nevažeći custom emoji ne bi blokirao slanje
+- counting stanje se čuva trajno, a tačan unos se vraća kao reply embed
 
 ### Evidencija ljubavnih aktivnosti
 

@@ -20,7 +20,7 @@ except ImportError:
 #              KONFIGURACIJA
 # ══════════════════════════════════════════════
 BOT_NAME   = "MONIKA BOT"
-VERSION    = "v4.2"
+VERSION    = "v4.3"
 TOKEN      = os.environ.get("DISCORD_TOKEN")
 BOT_PREFIX = "."
 
@@ -345,6 +345,7 @@ def load_data() -> dict:
         "zakletva": {},
         "welcome_greetings": {},
         "welcome_messages": {},
+        "counting": {},
         "support": {},
         "monika": {},
         "pomoc_usage": {},
@@ -979,14 +980,16 @@ class WelcomeView(discord.ui.View):
         if music_channel_id and guild_id:
             self.add_item(discord.ui.Button(
                 label="play music",
-                emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["music"]),
+                # Discord može odbiti application emoji ID u component dugmetu.
+                # Unicode emoji ostaje validan i nakon restarta ili promjene emoji-ja.
+                emoji="🎵",
                 style=discord.ButtonStyle.link,
                 url=f"https://discord.com/channels/{guild_id}/{music_channel_id}",
             ))
         else:
             self.add_item(discord.ui.Button(
                 label="play music",
-                emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["music"]),
+                emoji="🎵",
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
                 custom_id="squad_welcome_music_disabled",
@@ -994,7 +997,7 @@ class WelcomeView(discord.ui.View):
 
     @discord.ui.button(
         label="Poželi dobrodošlicu",
-        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["heart"]),
+        emoji="💗",
         style=discord.ButtonStyle.secondary,
         custom_id="squad_welcome_greet",
     )
@@ -1129,7 +1132,7 @@ class InfoView(discord.ui.View):
 
     @discord.ui.button(
         label="Info",
-        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["info"]),
+        emoji="ℹ️",
         style=discord.ButtonStyle.secondary,
         custom_id="squad_info_details",
     )
@@ -1198,7 +1201,7 @@ class InfoView(discord.ui.View):
 
     @discord.ui.button(
         label="GWS & Events",
-        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["gift"]),
+        emoji="🎁",
         style=discord.ButtonStyle.secondary,
         custom_id="squad_info_gws_events",
     )
@@ -1337,7 +1340,7 @@ class StaffPanelView(discord.ui.View):
 
     @discord.ui.button(
         label="Staff Apply",
-        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["file"]),
+        emoji="📄",
         style=discord.ButtonStyle.danger,
         custom_id="squad_staff_apply",
     )
@@ -1359,7 +1362,7 @@ class TicketCloseView(discord.ui.View):
 
     @discord.ui.button(
         label="Zatvori tiket",
-        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["lock"]),
+        emoji="🔒",
         style=discord.ButtonStyle.danger,
         custom_id="squad_ticket_close",
     )
@@ -1416,7 +1419,7 @@ class TicketPanelView(discord.ui.View):
 
     @discord.ui.button(
         label="Otvori Tiket",
-        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["ticket"]),
+        emoji="🎟️",
         style=discord.ButtonStyle.danger,
         custom_id="squad_ticket_open",
     )
@@ -1535,7 +1538,7 @@ class ReportCloseView(discord.ui.View):
 
     @discord.ui.button(
         label="Zatvori report",
-        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["lock"]),
+        emoji="🔒",
         style=discord.ButtonStyle.danger,
         custom_id="squad_report_close",
     )
@@ -1577,7 +1580,7 @@ class ReportPanelView(discord.ui.View):
 
     @discord.ui.button(
         label="Prijavi korisnika",
-        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["alert"]),
+        emoji="⚠️",
         style=discord.ButtonStyle.danger,
         custom_id="squad_report_open",
     )
@@ -1754,7 +1757,7 @@ class GiveawayView(discord.ui.View):
         self.giveaway_id = giveaway_id
         button = discord.ui.Button(
             label="Učestvuj",
-            emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["gift"]),
+            emoji="🎁",
             style=discord.ButtonStyle.success,
             custom_id=f"squad_giveaway_join:{giveaway_id}",
         )
@@ -5808,7 +5811,7 @@ async def pomoc(ctx: commands.Context, stranica: str = "1"):
 # Prefix je uvijek ".". Stanje mini-igara je odvojeno po kanalu da se
 # igre na različitim kanalima ne miješaju.
 KALADONT_GAMES = {}
-COUNTING_GAMES = {}
+COUNTING_LOCKS = {}
 HOT_COLD_GAMES = {}
 PROCESSED_GAME_MESSAGE_IDS = set()
 
@@ -5818,6 +5821,32 @@ def game_embed(title: str, lines, footer: str = None):
     if footer:
         e.set_footer(text=footer)
     return e
+
+def counting_embed(number: int, next_number: int = None, author_name: str = None, error: str = None):
+    """Embed za brojanje u stilu Discord reply kartice iz korisničkog primjera."""
+    if error:
+        description = (
+            f"> ❌ {error}\n>\n"
+            f"**Poslao/la:** {discord.utils.escape_markdown(author_name or 'Član')}"
+        )
+    else:
+        description = (
+            f"> ✅ **#{number}** · sljedeći: **{next_number}**\n>\n"
+            f"**Brojao/la:** {discord.utils.escape_markdown(author_name or 'Član')}"
+        )
+    return discord.Embed(description=description, color=_LP)
+
+async def send_counting_reply(ctx: commands.Context, embed: discord.Embed):
+    """Odgovori direktno na poruku s brojem, umjesto slanja nepovezane poruke."""
+    try:
+        await ctx.reply(
+            embed=embed,
+            mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    except discord.HTTPException as exc:
+        print(f"[COUNTING] Reply nije uspio u kanalu {ctx.channel.id}: {exc}")
+        await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
 @bot.command(name="ekonomija")
 async def ekonomija_igra(ctx: commands.Context):
@@ -5894,33 +5923,77 @@ async def counting(ctx: commands.Context, broj: int = None):
     if not await check_kanal(ctx, "counting"):
         return
     channel_id = ctx.channel.id
-    expected = COUNTING_GAMES.get(channel_id, 1)
+    guild_id = ctx.guild.id if ctx.guild else 0
+    game_key = f"{guild_id}:{channel_id}"
+    lock = COUNTING_LOCKS.setdefault(game_key, asyncio.Lock())
+    async with lock:
+        data = load_data()
+        counting_data = data.setdefault("counting", {})
+        if not isinstance(counting_data, dict):
+            counting_data = data["counting"] = {}
+        state = counting_data.setdefault(
+            game_key,
+            {"next": 1, "last_user_id": None},
+        )
+        if not isinstance(state, dict):
+            state = counting_data[game_key] = {"next": 1, "last_user_id": None}
+        expected = max(1, int(state.get("next", 1) or 1))
     if broj is None:
-        await ctx.send(embed=game_embed(
-            "🔢 Counting",
-            [f"> Sljedeći broj je **{expected}**.", "> Pošalji broj kao `.counting 1`."],
-            "Jedan broj po poruci",
-        ))
+        await ctx.send(
+            embed=discord.Embed(
+                description=(
+                    f"> 🔢 Sljedeći broj je **{expected}**.\n>\n"
+                    "Pošalji samo broj u counting kanalu ili koristi "
+                    "`.counting <broj>`."
+                ),
+                color=_LP,
+            )
+        )
         return
-    if broj != expected:
-        COUNTING_GAMES[channel_id] = 1
-        await ctx.send(embed=game_embed(
-            "🔢 Counting",
-            [f"> ❌ Pogrešno! Očekivao se broj **{expected}**.", "> Brojanje je resetovano na **1**."],
-            "Pokušajte ponovo",
-        ))
-        return
-    COUNTING_GAMES[channel_id] = expected + 1
-    reward = 5 if expected % 10 == 0 else 1
-    data = load_data()
-    wallet = get_ekonomija(data, ctx.author.id)
-    wallet["novac"] += reward
-    save_data(data)
-    await ctx.send(embed=game_embed(
-        "🔢 Counting",
-        [f"> ✅ **{broj}** je tačan broj!", f"> Sljedeći broj: **{broj + 1}**", f"> 💰 Nagrada: **+{reward}** novčića"],
-        "Nastavi brojanje",
-    ))
+    async with lock:
+        # Učitaj ponovo unutar brave: dvije poruke u isto vrijeme ne mogu
+        # prihvatiti isti broj niti prepisati stanje jedna drugoj.
+        data = load_data()
+        counting_data = data.setdefault("counting", {})
+        if not isinstance(counting_data, dict):
+            counting_data = data["counting"] = {}
+        state = counting_data.setdefault(
+            game_key,
+            {"next": 1, "last_user_id": None},
+        )
+        if not isinstance(state, dict):
+            state = counting_data[game_key] = {"next": 1, "last_user_id": None}
+        expected = max(1, int(state.get("next", 1) or 1))
+        last_user_id = state.get("last_user_id")
+
+        if broj != expected:
+            state.update({"next": 1, "last_user_id": None})
+            save_data(data)
+            embed = counting_embed(
+                broj,
+                author_name=ctx.author.display_name,
+                error=f"Pogrešan broj — očekivao se **{expected}**. Brojanje se vraća na **1**.",
+            )
+        elif expected > 1 and last_user_id == ctx.author.id:
+            state.update({"next": 1, "last_user_id": None})
+            save_data(data)
+            embed = counting_embed(
+                broj,
+                author_name=ctx.author.display_name,
+                error="Ne možeš brojati dva puta zaredom. Brojanje se vraća na **1**.",
+            )
+        else:
+            state.update({"next": expected + 1, "last_user_id": ctx.author.id})
+            reward = 5 if expected % 10 == 0 else 1
+            wallet = get_ekonomija(data, ctx.author.id)
+            wallet["novac"] += reward
+            save_data(data)
+            embed = counting_embed(
+                broj,
+                next_number=broj + 1,
+                author_name=ctx.author.display_name,
+            )
+    await send_counting_reply(ctx, embed)
 
 @bot.command(name="toplo-hladno")
 async def toplo_hladno(ctx: commands.Context, pogodak: int = None):
@@ -6234,7 +6307,9 @@ async def poruka(ctx: commands.Context, server_link: str = None):
     )
     poslato = 0
     preskoceno = 0
-    greske = 0
+    dm_odbijeno = 0
+    dm_http_greske = 0
+    prva_dm_greska = None
     ucitavanje_greska = None
     try:
         async for member in ctx.guild.fetch_members(limit=None):
@@ -6244,8 +6319,18 @@ async def poruka(ctx: commands.Context, server_link: str = None):
             try:
                 await member.send(embed=embed)
                 poslato += 1
-            except (discord.Forbidden, discord.HTTPException):
-                greske += 1
+            except discord.Forbidden:
+                # Discord često odbija DM kada član ima zatvorene privatne
+                # poruke ili bot nema dozvolu da mu se javi.
+                dm_odbijeno += 1
+            except discord.HTTPException as exc:
+                dm_http_greske += 1
+                if prva_dm_greska is None:
+                    prva_dm_greska = f"HTTP {exc.status}, Discord kod {exc.code}"
+                print(
+                    f"[PORUKA] Slanje DM-a nije uspjelo: "
+                    f"HTTP {exc.status}, Discord kod {exc.code}."
+                )
             # Drži slanje ispod Discordovog DM rate limita.
             await asyncio.sleep(0.25)
     except (discord.Forbidden, discord.HTTPException) as exc:
@@ -6261,8 +6346,13 @@ async def poruka(ctx: commands.Context, server_link: str = None):
     else:
         final_text = (
             f"Slanje završeno. Poslato: **{poslato}**, botovi preskočeni: "
-            f"**{preskoceno}**, privatne poruke nedostupne: **{greske}**."
+            f"**{preskoceno}**, Discord odbio privatnu poruku: **{dm_odbijeno}**."
         )
+        if dm_http_greske:
+            final_text += (
+                f" Ostale HTTP greške pri slanju: **{dm_http_greske}**"
+                + (f" (prva: {prva_dm_greska})." if prva_dm_greska else ".")
+            )
         if ucitavanje_greska:
             final_text += " Učitavanje članova je prekinuto; dio članova možda nije obrađen."
     await status_message.edit(content=final_text)
