@@ -1,0 +1,73 @@
+﻿#,Ključ (u kodu),Discord naziv,ID,Unicode fallback,Značenje
+1,wind,Wind,1517941435033194536,🌬️,Vjetar
+2,cloud,Cloud,1517941432942905521,☁️,Oblak
+3,moon,Moon,1517941429387919541,🌙,Mjesec
+4,sun,Sun,1517941426377119232,☀️,Sunce
+5,battery,Battery,1517941423629441425,🔋,Baterija
+6,calendar,Calendar,1517941401562648787,📅,Kalendar
+7,map,MapPin,1517941398668841010,📍,Mapa / lokacija
+8,phone,Phone,1517941395602542603,📱,Telefon
+9,mail,Mail,1517941392893018284,✉️,Pošta
+10,home,Home,1517941389965394203,🏠,Kuća
+11,down,ThumbsDown,1517941386698035222,👎,Palac dolje
+12,up,ThumbsUp,1517941383711948921,👍,Palac gore
+13,flag,Flag,1517941380469206776,🚩,Zastava
+14,bookmark,Bookmark,1517941377625886730,🔖,Obilježivač
+15,filter,Filter,1517941371363786873,🔽,Filter
+16,external,ExternalLink,1517941363109265621,🔗,Vanjski link
+17,minimize,Minimize,1517941359760076280,➖,Minimiziraj
+18,maximize,Maximize,1517941356968939603,➕,Maksimiziraj
+19,zoomout,ZoomOut,1517941354053894184,🔍,Umanji
+20,zoomin,ZoomIn,1517941351323275305,🔎,Povećaj
+21,move,Move,1517941346164412628,✋,Pomjeri
+22,terminal,Terminal,151794134051897364,💻,Terminal
+23,file,FileText,1517941323938795550,📄,Fajl
+24,database,Database,1517941320797130874,🗄️,Baza podataka
+25,square,Square,1517941317450334339,⬛,Kvadrat
+26,pause,Pause,15179413459664498,⏸️,Pauza
+27,play,Play,1517941312010190908,▶️,Play
+28,hand,Hand,1517941308927246461,✋,Ruka
+29,grid,Grid3x3,1517941306221924393,▦,Grid
+30,clock,Clock,1517941303462203452,🕒,Sat
+31,volume,Volume2,1517941300538638456,🔊,Zvuk
+32,ban,Ban,1517941295212003508,🚫,Ban
+33,mic,Mic,1517941292246634677,🎙️,Mikrofon
+34,ticket,Ticket,1517941289218347142,🎟️,Tiket
+35,rocket,Rocket,1517941286886314014,🚀,Raketa
+36,wrench,Wrench,1517941284247961680,🔧,Ključ
+37,archive,Archive,1517941281379192933,🗃️,Arhiva
+38,tag,Tag,1517941278372003921,🏷️,Tag
+39,chart,BarChart,1517941275691847730,📊,Grafikon
+40,bag,ShoppingBag,1517941270209626297,🛍️,Torba
+41,diamond,Diamond,1517941267626197052,💎,Dijamant
+42,check,Check,1517941205965607032,✅,Kvačica
+43,lock,Lock,1517941200403955922,🔒,Katanac
+44,info,Info,1517941197425868930,ℹ️,Info
+45,eye,Eye,1517941192330055791,👁️,Oko
+46,settings,Settings,1517941175292793014,⚙️,Podešavanja
+47,bell,Bell,1517941172545519697,🔔,Zvono
+48,user,User,1517941158364577842,👤,Korisnik
+49,message,MessageSquare,1517941155621507285,💬,Poruka
+50,search,Search,1517941131210395709,🔎,Pretraga
+51,shield,Shield,1517941138986893414,🛡️,Štit
+52,plus,Plus,1517941136138829957,➕,Plus
+53,close,X_icon,1517941133685035099,❌,Zatvori / X
+54,save,Save,1517941126005264434,💾,Sačuvaj
+55,music,Music,1517941123476226249,🎵,Muzika
+56,wallet,Wallet,1517941117671182376,👛,Novčanik
+57,crown,Crown,1517941115012255744,👑,Kruna
+58,trophy,Trophy,1517941103230193834,🏆,Trofej
+59,sparkles,Sparkles,1517941091666624796,✨,Iskrica
+60,users,Users,1517941085413203282,👥,Korisnici
+61,target,Target,1517941083483612837,🎯,Meta
+62,alert,AlertTriangle,1517941080576753734,⚠️,Upozorenje
+63,flame,Flame,1517941077880082433,🔥,Plamen
+64,book,BookOpen,1517941075241861245,📖,Knjiga
+65,globe,Globe,1517941072255254721,🌐,Globus
+66,swords,Swords,1517941062948225156,⚔️,Mačevi
+67,gift,Gift,1517941060071063623,🎁,Poklon
+68,briefcase,Briefcase,1517941057000706068,💼,Aktovka
+69,heart,Heart,151794104492643348,❤️,Srce
+70,layers,Layers,1517941048976998491,📚,Slojevi
+71,dollar,DollarSign,1517941046326202428,💵,Dolar
+72,game,Gamepad2,1517941043780387057,🎮,Gamepad
