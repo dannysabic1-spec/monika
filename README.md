@@ -4,6 +4,11 @@ Ovo je kompletan Discord bot sa ljubavnim sistemom, virtuelnom ekonomijom,
 kućama za parove, ribolovom, rang-listama, welcome panelom i Info/GWS & Events
 panelom.
 
+Na Replitu se bot pokreće workflow-om `MONIKA Discord Bot`. Potreban je Replit
+Secret `DISCORD_TOKEN`; komandu za podešavanje upisuj kao slash komandu sa `/`,
+ne sa prefixom `.`. Potvrde za podešavanje su privatne, a komande `-postavi`
+objavljuju panel u kanalu.
+
 ## 1. Instalacija
 
 Potrebno je:
@@ -68,6 +73,7 @@ Botu na serveru daj najmanje ove dozvole:
 - Embed Links
 - Read Message History
 - Add Reactions
+- Manage Channels (za kreiranje i zatvaranje privatnih ticket/report kanala)
 
 Za automatsku ulogu novim članovima dodatno treba:
 
@@ -164,6 +170,9 @@ Pregled podešavanja:
 /info-status
 ```
 
+`/info-podesi` i `/ticket-podesi` samo sačuvaju podešavanja i pokažu privatnu
+potvrdu. Za javni panel pokreni odgovarajuću komandu `-postavi`.
+
 ## 6. Staff prijave i Ticket sistem
 
 Podesi kanal u koji staff dobija prijave i opcionalnu staff ulogu:
@@ -199,6 +208,16 @@ Klik na `Otvori Tiket` pravi privatni kanal za korisnika i staff. Jedan
 korisnik može imati samo jedan otvoren tiket, a tiket se zatvara dugmetom
 `Zatvori tiket`.
 
+Za slanje vlastitog teksta kao embed poruke koristi:
+
+```text
+/embed tekst:Poruka koju želiš objaviti naslov:Naslov kanal:#kanal
+```
+
+Naslov i kanal su opcionalni; bez kanala embed se šalje u kanal u kojem je
+komanda pokrenuta. Komanda je dostupna administratorima, a sama embed poruka
+je javna. Potvrda o slanju prikazuje se samo tebi.
+
 ### Report sistem
 
 Report je odvojen od običnog ticketa i podešava se jednom komandom:
@@ -231,6 +250,7 @@ Svi embed-i koriste sivo-crnu dark boju (`#2B2D31`) i kompaktan prikaz bez `>` o
 /staff-postavi
 /ticket-podesi
 /ticket-postavi
+/embed
 /setreport
 /setmonika
 /iskljuci-moniku

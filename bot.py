@@ -3068,6 +3068,70 @@ async def ticket_postavi(
         ephemeral=True,
     )
 
+@bot.tree.command(name="embed", description="[ADMIN] Pošalji svoj tekst kao embed")
+@app_commands.describe(
+    tekst="Tekst koji će biti prikazan u embedu",
+    naslov="Naslov embeda (opcionalno)",
+    kanal="Kanal za slanje (opcionalno, podrazumijeva trenutni kanal)",
+)
+@app_commands.default_permissions(administrator=True)
+async def posalji_embed(
+    interaction: discord.Interaction,
+    tekst: str,
+    naslov: str = None,
+    kanal: discord.TextChannel = None,
+):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "Ova komanda se koristi samo na serveru.", ephemeral=True
+        )
+        return
+
+    if not tekst.strip() or len(tekst) > 4096:
+        await interaction.response.send_message(
+            "Unesi tekst do 4096 znakova.", ephemeral=True
+        )
+        return
+    if naslov and len(naslov) > 256:
+        await interaction.response.send_message(
+            "Naslov može imati najviše 256 znakova.", ephemeral=True
+        )
+        return
+
+    target = kanal or interaction.channel
+    if not isinstance(target, discord.TextChannel):
+        await interaction.response.send_message(
+            "Izaberi tekstualni kanal za embed.", ephemeral=True
+        )
+        return
+
+    embed = discord.Embed(
+        title=naslov or None,
+        description=tekst,
+        color=_LP,
+    )
+    try:
+        await target.send(
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            "Ne mogu poslati embed u taj kanal. Provjeri dozvole bota.",
+            ephemeral=True,
+        )
+        return
+    except discord.HTTPException:
+        await interaction.response.send_message(
+            "Discord nije prihvatio embed. Provjeri dužinu teksta i probaj ponovo.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.send_message(
+        f"✅ Embed je poslat u {target.mention}.", ephemeral=True
+    )
+
 @bot.tree.command(name="setreport", description="Vlasnik/admin: podesi privatni report panel")
 @app_commands.describe(
     kanal="Kanal u koji se šalje report panel",
