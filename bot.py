@@ -424,21 +424,6 @@ def save_data(data: dict):
     except Exception as e:
         print(f"[ERROR] save_data: {e}")
 
-def disable_welcome_dm_for_existing_servers():
-    """Jednokratno isključi stare DM postavke koje su ranije bile podrazumijevane."""
-    data = load_data()
-    migration_key = "welcome_dm_off_migrated_v1"
-    if data.get(migration_key):
-        return
-
-    for cfg in data.get("welcome", {}).values():
-        if isinstance(cfg, dict):
-            cfg["dm_enabled"] = False
-
-    data[migration_key] = True
-    save_data(data)
-    print("[WELCOME] Welcome DM je isključen kao početna postavka.")
-
 def asset_path(filename: str) -> str:
     """Nađi asset i kad je ime fajla dobilo jedinstveni sufiks pri uploadu."""
     exact_path = os.path.join(DATA_DIR, filename)
@@ -623,7 +608,6 @@ def get_welcome(data: dict, guild_id: int) -> dict:
             "pozdrav_channel_id": None,
             "role_id": None,
             "enabled": False,
-            "dm_enabled": False,
         }
     cfg = data["welcome"][key]
     defaults = {
@@ -634,7 +618,6 @@ def get_welcome(data: dict, guild_id: int) -> dict:
         "pozdrav_channel_id": None,
         "role_id": None,
         "enabled": bool(cfg.get("channel_id")),
-        "dm_enabled": False,
     }
     for k, v in defaults.items():
         if k not in cfg:
@@ -2808,7 +2791,6 @@ async def on_ready():
     global PERSISTENT_VIEWS_REGISTERED, MONIKA_GUESS_TASK
     global VOICE_ACTIVITY_TASK, VOICE_ACTIVITY_RECONCILED
     await load_application_emojis()
-    disable_welcome_dm_for_existing_servers()
     if bot.user:
         try:
             # Učitaj vlasnika aplikacije prije prve admin/owner komande,
@@ -2880,7 +2862,7 @@ async def on_ready():
 
 @bot.event
 async def on_member_join(member: discord.Member):
-    """Šalje welcome poruku u podešeni kanal i privatni inbox novog člana."""
+    """Šalje welcome poruku samo u podešeni server kanal."""
     print(f"[WELCOME] Novi član {member.id} na serveru {member.guild.id}.")
     join_embed = discord.Embed(
         title=f"{CUSTOM_EMOJI['users']} Novi član",
@@ -2952,43 +2934,6 @@ async def on_member_join(member: discord.Member):
         )
     else:
         print(f"[WELCOME] Nema podešenog welcome kanala za server {member.guild.id}.")
-
-    if cfg.get("dm_enabled", False):
-        try:
-            dm_view = WelcomeView(
-                member.id,
-                cfg.get("music_channel_id"),
-                member.guild.id,
-                cfg.get("pozdrav_channel_id"),
-                greeting_id,
-            )
-            dm_message = await member.send(
-                embed=build_welcome_embed(member, member.guild, cfg),
-                view=dm_view,
-                allowed_mentions=discord.AllowedMentions(
-                    users=[member],
-                    roles=False,
-                    everyone=False,
-                ),
-            )
-            await remember_welcome_message(
-                dm_message,
-                member.id,
-                cfg.get("music_channel_id"),
-                member.guild.id,
-                cfg.get("pozdrav_channel_id"),
-                greeting_id,
-            )
-            print(f"[WELCOME] Privatna poruka poslata članu {member.id}.")
-        except discord.Forbidden:
-            print(
-                f"[WELCOME] Discord je odbio DM članu {member.id}; "
-                "privatne poruke su vjerovatno zatvorene."
-            )
-        except discord.HTTPException as exc:
-            print(f"[WELCOME] Slanje privatne poruke članu {member.id} nije uspjelo: {exc}")
-    else:
-        print(f"[WELCOME] DM welcome je isključen za server {member.guild.id}.")
 
     role_id = cfg.get("role_id")
     if role_id:
@@ -3459,7 +3404,6 @@ async def ukloni_kanal(interaction: discord.Interaction, tip: str):
     music="Kanal za music dugme (opcionalno)",
     pozdrav="Kanal za poruke nakon klika na Poželi dobrodošlicu (opcionalno)",
     uloga="Uloga koja se automatski dodjeljuje novom članu (opcionalno)",
-    dm="Pokušaj poslati Welcome poruku novom članu u DM",
 )
 @app_commands.default_permissions(administrator=True)
 async def welcome_podesi(
@@ -3470,7 +3414,6 @@ async def welcome_podesi(
     music: discord.TextChannel = None,
     pozdrav: discord.TextChannel = None,
     uloga: discord.Role = None,
-    dm: bool = False,
 ):
     if interaction.guild is None:
         await interaction.response.send_message(
@@ -3496,7 +3439,6 @@ async def welcome_podesi(
     data = load_data()
     cfg = get_welcome(data, interaction.guild.id)
     cfg["enabled"] = True
-    cfg["dm_enabled"] = dm
     cfg["channel_id"] = kanal.id
     cfg["pravila_channel_id"] = pravila.id if pravila else None
     cfg["chat_channel_id"] = chat.id if chat else None
@@ -3523,7 +3465,6 @@ async def welcome_podesi(
         f"> {e('mooncat')} **Music:** {music_txt}\n"
         f"> {e('crayon')} **Poruka dobrodošlice:** {pozdrav_txt}\n"
         f"> {e('fire')} **Automatska uloga:** {role_txt}\n"
-        f"> {e('mail')} **Welcome u DM:** {'uključen' if dm else 'isključen'}\n"
         f">\n"
         f"> {e('sparkles')} Podešavanja su sačuvana za ovaj server."
     )
@@ -3595,8 +3536,6 @@ async def welcome_status(interaction: discord.Interaction):
         f"> {e('love')} **Welcome kanal:** {mention(cfg.get('channel_id'))}\n"
         f"> {e('sparkles')} **Automatski welcome:** "
         f"{'uključen' if cfg.get('enabled', bool(cfg.get('channel_id'))) else 'isključen'}\n"
-        f"> {e('mail')} **Welcome u DM:** "
-        f"{'uključen' if cfg.get('dm_enabled', False) else 'isključen'}\n"
         f"> {e('ghost')} **Pravila:** {mention(cfg.get('pravila_channel_id'))}\n"
         f"> {e('sharks')} **Chat:** {mention(cfg.get('chat_channel_id'))}\n"
         f"> {e('mooncat')} **Music:** {mention(cfg.get('music_channel_id'))}\n"
@@ -3692,10 +3631,9 @@ async def welcome_iskljuci(interaction: discord.Interaction):
     cfg = get_welcome(data, interaction.guild.id)
     cfg["channel_id"] = None
     cfg["enabled"] = False
-    cfg["dm_enabled"] = False
     save_data(data)
     await interaction.response.send_message(
-        "✅ Automatske welcome poruke u server kanalu i DM-u su isključene. "
+        "✅ Automatske welcome poruke u server kanalu su isključene. "
         "Podešavanja ostalih kanala su sačuvana.",
         ephemeral=True,
     )
