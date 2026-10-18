@@ -22,7 +22,7 @@ except ImportError:
 #              KONFIGURACIJA
 # ══════════════════════════════════════════════
 BOT_NAME   = "MONIKA BOT"
-VERSION    = "v4.5"
+VERSION    = "v4.6"
 TOKEN      = os.environ.get("DISCORD_TOKEN")
 BOT_PREFIX = "."
 
@@ -570,6 +570,10 @@ def get_kanali(data: dict, guild_id: int) -> dict:
         data["kanali"][key] = {
             "ljubav": None,
             "pecanje": None,
+            "ekonomija": None,
+            "kuca": None,
+            "zabava": None,
+            "rangliste": None,
             "counting": None,
             "toplo_hladno": None,
             "kaladont": None,
@@ -581,6 +585,10 @@ def get_kanali(data: dict, guild_id: int) -> dict:
     defaults = {
         "ljubav": None,
         "pecanje": None,
+        "ekonomija": None,
+        "kuca": None,
+        "zabava": None,
+        "rangliste": None,
         "counting": None,
         "toplo_hladno": None,
         "kaladont": None,
@@ -977,6 +985,52 @@ def is_known_bhs_word(word: str) -> bool:
 # ══════════════════════════════════════════════
 #         CHANNEL CHECK
 # ══════════════════════════════════════════════
+async def send_private_game_notice(
+    ctx: commands.Context,
+    content: str = None,
+    *,
+    embed: discord.Embed = None,
+) -> bool:
+    """Pošalji grešku igre samo autoru; ne objavljuj greške cijelom kanalu."""
+    now = asyncio.get_running_loop().time()
+    guild_id = ctx.guild.id if ctx.guild else 0
+    notice_key = (guild_id, ctx.author.id)
+    last_notice = GAME_ERROR_NOTICE_TIMES.get(notice_key, 0)
+    if now - last_notice < GAME_ERROR_NOTICE_COOLDOWN_SECONDS:
+        return False
+    GAME_ERROR_NOTICE_TIMES[notice_key] = now
+    if len(GAME_ERROR_NOTICE_TIMES) > 5000:
+        cutoff = now - GAME_ERROR_NOTICE_COOLDOWN_SECONDS * 4
+        for key, seen_at in list(GAME_ERROR_NOTICE_TIMES.items()):
+            if seen_at < cutoff:
+                GAME_ERROR_NOTICE_TIMES.pop(key, None)
+
+    try:
+        await ctx.author.send(
+            content=content,
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        return True
+    except discord.Forbidden:
+        # DM može biti zatvoren. Reakcija je neutralna i ne otkriva tekst greške.
+        if ctx.message:
+            try:
+                await ctx.message.add_reaction("🔒")
+            except discord.HTTPException:
+                pass
+        return False
+    except discord.HTTPException as exc:
+        print(
+            f"[IGRE] Privatna obavijest nije poslana korisniku "
+            f"{ctx.author.id}: HTTP {exc.status}, Discord kod {exc.code}."
+        )
+        return False
+
+# Ograniči privatne greške da pogrešan unos ne izazove DM spam.
+GAME_ERROR_NOTICE_TIMES = {}
+GAME_ERROR_NOTICE_COOLDOWN_SECONDS = 8
+
 async def check_kanal(ctx: commands.Context, tip: str) -> bool:
     if not ctx.guild:
         return True
@@ -988,12 +1042,75 @@ async def check_kanal(ctx: commands.Context, tip: str) -> bool:
     if ctx.channel.id != dozvola:
         kanal_obj = ctx.guild.get_channel(dozvola)
         naziv     = kanal_obj.mention if kanal_obj else f"<#{dozvola}>"
-        await ctx.send(embed=discord.Embed(
-            description=f"> ❌ Ova komanda je dostupna samo u {naziv}!",
-            color=_LP
-        ))
+        await send_private_game_notice(
+            ctx,
+            f"Ova komanda je dostupna samo u {naziv}.",
+        )
         return False
     return True
+
+PREFIX_COMMAND_CHANNEL_TYPES = {
+    # Ljubavni sistem
+    **{
+        name: "ljubav"
+        for name in (
+            "veza", "brak", "prsten", "svadba", "obnova", "zakletva",
+            "spavanje", "srce", "zagrljaj", "poljubac", "ples", "poklon",
+            "cvijece", "cokolada", "ruza", "ogrlica", "sat", "parfem",
+            "auto", "jahte", "ljubomora", "djeca", "beba", "izlet",
+            "vecera", "putovanje", "album", "datum", "godisnjica", "razina",
+            "statistika", "profil", "razvod",
+        )
+    },
+    # Odvojeni kanali za kuću, ekonomiju, zabavu i rang-liste
+    **{
+        name: "kuca"
+        for name in (
+            "stan", "kuca", "soba", "kuhinja", "spavaca", "kupatilo",
+            "vrt", "bazen", "garaza", "namjestaj",
+        )
+    },
+    **{
+        name: "ekonomija"
+        for name in (
+            "ekonomija", "rad", "plata", "novac", "banka", "uplati",
+            "podigni", "transfer", "market", "kupi", "pokloni",
+        )
+    },
+    **{
+        name: "zabava"
+        for name in (
+            "pijte", "film", "istina", "izazov", "ljubavni-test",
+            "compatibility", "giveaways",
+        )
+    },
+    **{
+        name: "rangliste"
+        for name in (
+            "evidencija", "topljubav", "topxp", "topbogati",
+            "topparovi", "topstanovi",
+        )
+    },
+    # Ribolov i mini-igre imaju svoj pojedinačni kanal
+    **{
+        name: "pecanje"
+        for name in ("pecanje", "ribnjak", "prodaj", "ribar", "top-ribar")
+    },
+    "casino": "casino",
+    "counting": "counting",
+    "toplo-hladno": "toplo_hladno",
+    "kaladont": "kaladont",
+}
+
+@bot.check
+async def enforce_configured_prefix_command_channel(ctx: commands.Context) -> bool:
+    """Ograniči članske prefix komande na njihove podešene kategorijske kanale."""
+    if not ctx.guild or not ctx.command:
+        return True
+    channel_type = PREFIX_COMMAND_CHANNEL_TYPES.get(ctx.command.name)
+    if not channel_type:
+        return True
+    return await check_kanal(ctx, channel_type)
 
 async def check_pomoc_channel(ctx: commands.Context) -> bool:
     """Pomoć je dostupna samo u kanalu koji je postavio administrator."""
@@ -1312,6 +1429,37 @@ async def _is_bot_owner_or_admin(interaction: discord.Interaction) -> bool:
         )
     )
 
+@bot.tree.command(name="sync", description="[ADMIN] Osvježi slash komande bota")
+@app_commands.default_permissions(administrator=True)
+async def sync_slash_commands(interaction: discord.Interaction):
+    """Ručno osvježi globalne slash komande bez ponovnog pokretanja bota."""
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    if not await _is_bot_owner_or_admin(interaction):
+        await interaction.edit_original_response(
+            content="Samo vlasnik bota ili administrator servera može osvježiti komande."
+        )
+        return
+
+    try:
+        synced_commands = await bot.tree.sync()
+    except discord.HTTPException as exc:
+        print(
+            f"[SLASH SYNC ERROR] Ručna sinhronizacija nije uspjela: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        await interaction.edit_original_response(
+            content="Discord nije prihvatio sinhronizaciju. Provjeri konzolu bota."
+        )
+        return
+
+    await interaction.edit_original_response(
+        content=(
+            f"Slash komande su osvježene: **{len(synced_commands)}** "
+            f"({', '.join(command.name for command in synced_commands)}). "
+            "Ovo ne restartuje proces bota."
+        )
+    )
+
 # Pamti welcome poruke koje su već dobile jednu dobrodošlicu.
 # Svaka welcome poruka može imati samo jedan uspješan klik.
 WELCOME_GREETINGS = set()
@@ -1373,10 +1521,14 @@ class WelcomeView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+        # Potvrdi klik prije čekanja na lock i lokalno čuvanje podataka.
+        await interaction.response.defer(
+            ephemeral=bool(interaction.guild),
+            thinking=True,
+        )
         if interaction.user.bot:
-            await interaction.response.send_message(
-                "Botovi ne mogu slati dobrodošlice.",
-                ephemeral=bool(interaction.guild),
+            await interaction.edit_original_response(
+                content="Botovi ne mogu slati dobrodošlice.",
             )
             return
 
@@ -1393,11 +1545,12 @@ class WelcomeView(discord.ui.View):
                 or greeting_key in saved_greetings
                 or str(message_id) in saved_greetings
             ):
-                await interaction.response.send_message(
-                    f"{welcome_emoji(interaction.guild, 'love')} "
-                    "Dobrodošlicu je već poslala druga osoba. "
-                    "Ovo dugme može biti iskorišteno samo jednom.",
-                    ephemeral=bool(interaction.guild),
+                await interaction.edit_original_response(
+                    content=(
+                        f"{welcome_emoji(interaction.guild, 'love')} "
+                        "Dobrodošlicu je već poslala druga osoba. "
+                        "Ovo dugme može biti iskorišteno samo jednom."
+                    ),
                 )
                 return
 
@@ -1410,10 +1563,6 @@ class WelcomeView(discord.ui.View):
                 "timestamp": now_ts(),
             }
             save_data(data)
-            await interaction.response.defer(
-                ephemeral=bool(interaction.guild),
-                thinking=True,
-            )
 
             # Odmah ugasi dugme na originalnoj poruci.
             for child in self.children:
@@ -2700,9 +2849,9 @@ async def on_message(message: discord.Message):
             if raw.isdigit():
                 await toplo_hladno.callback(ctx, int(raw))
             elif raw:
-                await react_to_game_input(
-                    message,
-                    "Pošalji broj od 1 do 100 za igru Toplo-hladno.",
+                await send_private_game_notice(
+                    ctx,
+                    "Pošalji broj od **1 do 100** za igru Toplo-hladno.",
                 )
             return
         if (
@@ -2711,9 +2860,9 @@ async def on_message(message: discord.Message):
             if raw.isdigit():
                 await counting.callback(ctx, int(raw))
             elif raw:
-                await react_to_game_input(
-                    message,
-                    "Brojanje prima samo sljedeći broj.",
+                await send_private_game_notice(
+                    ctx,
+                    "Brojanje prima samo sljedeći broj kao cifru.",
                 )
             return
         if (
@@ -2728,10 +2877,9 @@ async def on_message(message: discord.Message):
                 await casino.callback(ctx, parts[0], int(parts[1]))
                 return
             if raw:
-                await react_to_game_input(
-                    message,
+                await send_private_game_notice(
+                    ctx,
                     "Za casino koristi `coin 50` ili `slot 50`.",
-                    "🎰",
                 )
                 return
         # Brojevi u Monikinom kanalu prvo pripadaju njenom izazovu.
@@ -3022,6 +3170,19 @@ async def on_member_unban(guild: discord.Guild, user: discord.User):
 
 @bot.event
 async def on_command_error(ctx: commands.Context, error):
+    if ctx.command and ctx.command.name in {
+        "casino",
+        "counting",
+        "toplo-hladno",
+        "kaladont",
+    }:
+        await send_private_game_notice(
+            ctx,
+            "Unos za ovu igru nije ispravan. Detalje komande možeš provjeriti "
+            "pomoću `.pomoc`; greška nije objavljena u kanalu.",
+        )
+        return
+
     if isinstance(error, commands.MissingRequiredArgument):
         await ctx.send(embed=discord.Embed(
             description="> ❌ Nedostaje argument. Ukucaj `.pomoc` za pomoć.",
@@ -3063,6 +3224,10 @@ async def on_command_error(ctx: commands.Context, error):
 @app_commands.choices(tip=[
     app_commands.Choice(name="Ljubav", value="ljubav"),
     app_commands.Choice(name="Pecanje", value="pecanje"),
+    app_commands.Choice(name="Ekonomija", value="ekonomija"),
+    app_commands.Choice(name="Kuća", value="kuca"),
+    app_commands.Choice(name="Zabava", value="zabava"),
+    app_commands.Choice(name="Rang-liste", value="rangliste"),
     app_commands.Choice(name="Counting", value="counting"),
     app_commands.Choice(name="Toplo-hladno", value="toplo_hladno"),
     app_commands.Choice(name="Kaladont", value="kaladont"),
@@ -3070,6 +3235,19 @@ async def on_command_error(ctx: commands.Context, error):
 ])
 @app_commands.default_permissions(administrator=True)
 async def setkanal(interaction: discord.Interaction, tip: str, kanal: discord.TextChannel):
+    if not interaction.guild:
+        await interaction.response.send_message(
+            "Ova komanda radi samo na serveru.",
+            ephemeral=True,
+        )
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    if not await _is_bot_owner_or_admin(interaction):
+        await interaction.edit_original_response(
+            content="Samo vlasnik bota ili administrator servera može podesiti kanal.",
+        )
+        return
+
     data   = load_data()
     kanali = get_kanali(data, interaction.guild.id)
     kanali[tip] = kanal.id
@@ -3077,16 +3255,22 @@ async def setkanal(interaction: discord.Interaction, tip: str, kanal: discord.Te
     naziv_tip = {
         "ljubav": "Ljubavne komande",
         "pecanje": "Ribolov komande",
+        "ekonomija": "Ekonomske komande",
+        "kuca": "Komande za kuću",
+        "zabava": "Zabavne komande",
+        "rangliste": "Komande za rang-liste",
         "counting": "Counting igra",
         "toplo_hladno": "Toplo-hladno igra",
         "kaladont": "Kaladont igra",
         "casino": "Casino igra",
     }.get(tip, tip)
-    await interaction.response.send_message(embed=discord.Embed(
-        title="✅ Kanal podešen",
-        description=f"> **{naziv_tip}** su sada dostupne samo u {kanal.mention}!",
-        color=_LP
-    ))
+    await interaction.edit_original_response(
+        embed=discord.Embed(
+            title="✅ Kanal podešen",
+            description=f"> **{naziv_tip}** su sada dostupne samo u {kanal.mention}!",
+            color=_LP,
+        )
+    )
 
 @bot.tree.command(name="setlogin", description="Vlasnik/admin: postavi kanal evidencije")
 @app_commands.describe(kanal="Kanal za logove dolazaka, banova i unbanova")
@@ -4727,7 +4911,7 @@ async def ples(ctx: commands.Context, target: discord.Member = None):
 # ══════════════════════════════════════════════
 @bot.command(name="pijte")
 async def pijte(ctx: commands.Context):
-    if not await check_kanal(ctx, "ljubav"):
+    if not await check_kanal(ctx, "zabava"):
         return
     PIJENJA = [
         f"{ctx.author.mention} nazdravlja svima! 🥂",
@@ -4750,7 +4934,7 @@ async def pijte(ctx: commands.Context):
 # ══════════════════════════════════════════════
 @bot.command(name="film")
 async def film(ctx: commands.Context):
-    if not await check_kanal(ctx, "ljubav"):
+    if not await check_kanal(ctx, "zabava"):
         return
     FILMOVI = [
         "Titanic 🚢", "The Notebook 📔", "La La Land 🎵",
@@ -4781,7 +4965,7 @@ async def film(ctx: commands.Context):
 # ══════════════════════════════════════════════
 @bot.command(name="istina")
 async def istina(ctx: commands.Context):
-    if not await check_kanal(ctx, "ljubav"):
+    if not await check_kanal(ctx, "zabava"):
         return
     PITANJA = [
         "Jesi li ikad lagao/la svom partneru?",
@@ -4810,7 +4994,7 @@ async def istina(ctx: commands.Context):
 # ══════════════════════════════════════════════
 @bot.command(name="izazov")
 async def izazov(ctx: commands.Context):
-    if not await check_kanal(ctx, "ljubav"):
+    if not await check_kanal(ctx, "zabava"):
         return
     IZAZOVI = [
         "Pošalji GIF kako plešeš u sljedećih 5 minuta!",
@@ -4838,7 +5022,7 @@ async def izazov(ctx: commands.Context):
 # ══════════════════════════════════════════════
 @bot.command(name="ljubavni-test")
 async def ljubavni_test(ctx: commands.Context, target: discord.Member = None):
-    if not await check_kanal(ctx, "ljubav"):
+    if not await check_kanal(ctx, "zabava"):
         return
     if target is None:
         await ctx.send(embed=discord.Embed(description="> ❌ Navedi korisnika: `.ljubavni-test @Korisnik`", color=_LP)); return
@@ -4886,7 +5070,7 @@ async def ljubavni_test(ctx: commands.Context, target: discord.Member = None):
 # ══════════════════════════════════════════════
 @bot.command(name="compatibility")
 async def compatibility(ctx: commands.Context, target: discord.Member = None):
-    if not await check_kanal(ctx, "ljubav"):
+    if not await check_kanal(ctx, "zabava"):
         return
     if target is None:
         await ctx.send(embed=discord.Embed(description="> ❌ Navedi korisnika: `.compatibility @Korisnik`", color=_LP)); return
@@ -5637,7 +5821,7 @@ async def razvod(ctx: commands.Context):
 # ══════════════════════════════════════════════
 @bot.command(name="stan")
 async def stan_cmd(ctx: commands.Context):
-    if not await check_kanal(ctx, "ljubav"): return
+    if not await check_kanal(ctx, "kuca"): return
     data = load_data()
     p    = get_profile(data, ctx.author.id)
 
@@ -5682,7 +5866,7 @@ async def stan_cmd(ctx: commands.Context):
 # ══════════════════════════════════════════════
 @bot.command(name="kuca")
 async def kuca(ctx: commands.Context):
-    if not await check_kanal(ctx, "ljubav"): return
+    if not await check_kanal(ctx, "kuca"): return
     data = load_data()
     p    = get_profile(data, ctx.author.id)
 
@@ -5735,7 +5919,7 @@ async def kuca(ctx: commands.Context):
 #   .soba / .kuhinja / .spavaca / itd.
 # ══════════════════════════════════════════════
 async def kupi_sobu(ctx: commands.Context, soba_id: str):
-    if not await check_kanal(ctx, "ljubav"): return
+    if not await check_kanal(ctx, "kuca"): return
     data = load_data()
     p    = get_profile(data, ctx.author.id)
 
@@ -5793,7 +5977,7 @@ async def kupi_sobu(ctx: commands.Context, soba_id: str):
 
 @bot.command(name="soba")
 async def soba(ctx: commands.Context, naziv: str = None):
-    if not await check_kanal(ctx, "ljubav"): return
+    if not await check_kanal(ctx, "kuca"): return
     if naziv is None:
         data = load_data()
         p    = get_profile(data, ctx.author.id)
@@ -5843,7 +6027,7 @@ async def garaza(ctx): await kupi_sobu(ctx, "garaza")
 # ══════════════════════════════════════════════
 @bot.command(name="namjestaj")
 async def namjestaj(ctx: commands.Context):
-    if not await check_kanal(ctx, "ljubav"): return
+    if not await check_kanal(ctx, "kuca"): return
     NAMJESTAJ_LISTA = [
         ("🛋️", "Sofa",        200),
         ("🪑", "Stolica",      50),
@@ -6621,9 +6805,9 @@ def pomoc_pages():
                 "> **Ribolov**\n"
                 "> `.pecanje` · `.ribnjak [@Korisnik]` · `.prodaj` · `.ribar`\n\n"
                 "> **Mini-igre**\n"
-                "> `.counting 1` — Zajedničko brojanje\n"
-                "> `.toplo-hladno [broj]` — Pogodi broj\n"
-                "> `.kaladont [riječ]` — Igra riječima\n"
+                "> `.counting 1` — Pokreni brojanje; zatim šalji samo brojeve\n"
+                "> `.toplo-hladno` — Pokreni rundu; zatim šalji samo brojeve\n"
+                "> `.kaladont` — Pokreni rundu; zatim šalji riječi bez prefiksa\n"
                 "> `.pijte` · `.film` · `.istina` · `.izazov`\n"
                 "> `.ljubavni-test @Korisnik` · `.compatibility @Korisnik`\n\n"
                 "> **Rang-liste**\n"
@@ -6867,7 +7051,8 @@ async def pomoc(ctx: commands.Context, stranica: str = "1"):
         "> `/welcome-iskljuci` — Isključi welcome sistem\n"
         "> `/info-podesi` — Podesi Info/GWS kanal\n"
         "> `/info-postavi` — Pošalji Info panel\n"
-        "> `/info-status` — Pregled Info podešavanja"
+        "> `/info-status` — Pregled Info podešavanja\n"
+        "> `/sync` — Ručno osvježi slash komande"
     ), inline=False)
     e.set_footer(text=f"Strana 1/3 • {BOT_NAME} {VERSION} • .pomoc 2 | .pomoc 3 za više komandi")
     poslato_u_dm = await send_pomoc_dm(ctx, e)
@@ -6886,8 +7071,10 @@ async def pomoc(ctx: commands.Context, stranica: str = "1"):
 # Prefix je uvijek ".". Stanje mini-igara je odvojeno po kanalu da se
 # igre na različitim kanalima ne miješaju.
 KALADONT_GAMES = {}
+KALADONT_LOCKS = {}
 COUNTING_LOCKS = {}
 HOT_COLD_GAMES = {}
+HOT_COLD_LOCKS = {}
 PROCESSED_GAME_MESSAGE_IDS = set()
 KALADONT_STICKER_FILES = (
     "game_sticker_kaladont.png",
@@ -6911,28 +7098,6 @@ def game_embed(title: str, lines, footer: str = None):
     if footer:
         e.set_footer(text=footer)
     return e
-
-async def react_to_game_input(
-    message: discord.Message,
-    reply_text: str,
-    emoji: str = "🔢",
-):
-    """Daj kratku emoji potvrdu za tekst u igri koja prima samo brojeve."""
-    try:
-        await message.add_reaction(emoji)
-    except discord.Forbidden:
-        try:
-            await message.reply(
-                reply_text,
-                mention_author=False,
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
-        except discord.HTTPException as exc:
-            print(f"[IGRE] Nije moguće odgovoriti na poruku {message.id}: {exc}")
-    except discord.HTTPException as exc:
-        # Ne šalji drugi odgovor nakon neizvjesne greške; Discord je možda
-        # već prihvatio reakciju prije prekida veze.
-        print(f"[IGRE] Reakcija nije potvrđena za poruku {message.id}: {exc}")
 
 async def send_game_embed(
     ctx: commands.Context,
@@ -7046,35 +7211,21 @@ async def casino(ctx: commands.Context, igra: str = None, iznos: int = None):
         return
     igra = igra.lower()
     if igra not in {"coin", "slot"}:
-        await send_game_embed(
-            ctx,
-            game_embed("🎰 Casino", ["> ❌ Izaberi `coin` ili `slot`."], "Koristi .casino"),
-            "casino",
-        )
+        await send_private_game_notice(ctx, "Izaberi `coin` ili `slot` za casino.")
         return
     if iznos is None or iznos < 10:
-        await send_game_embed(
+        await send_private_game_notice(
             ctx,
-            game_embed(
-                "🎰 Casino",
-                ["> ❌ Upiši ulog od najmanje **10** novčića."],
-                "Primjer: .casino coin 50",
-            ),
-            "casino",
+            "Ulog mora biti najmanje **10** novčića. Primjer: `.casino coin 50`.",
         )
         return
     data = load_data()
     wallet = get_ekonomija(data, ctx.author.id)
     novac = wallet.get("novac", 0)
     if iznos > novac:
-        await send_game_embed(
+        await send_private_game_notice(
             ctx,
-            game_embed(
-                "🎰 Casino",
-                [f"> ❌ Nemaš dovoljno novca. Imaš **{novac:,}** novčića."],
-                "Uplati ili zaradi novac",
-            ),
-            "casino",
+            f"Nemaš dovoljno novca za taj ulog. Tvoje stanje je **{novac:,}** novčića.",
         )
         return
     wallet["novac"] -= iznos
@@ -7154,21 +7305,19 @@ async def counting(ctx: commands.Context, broj: int = None):
         expected = max(1, int(state.get("next", 1) or 1))
         last_user_id = state.get("last_user_id")
 
+        error_message = None
         if broj != expected:
             state.update({"next": 1, "last_user_id": None})
             save_data(data)
-            embed = counting_embed(
-                broj,
-                author_mention=ctx.author.mention,
-                error=f"Pogrešan broj — očekivao se **{expected}**. Brojanje se vraća na **1**.",
+            error_message = (
+                f"Pogrešan broj. Očekivao se **{expected}**; brojanje je "
+                "vraćeno na **1**."
             )
         elif expected > 1 and last_user_id == ctx.author.id:
             state.update({"next": 1, "last_user_id": None})
             save_data(data)
-            embed = counting_embed(
-                broj,
-                author_mention=ctx.author.mention,
-                error="Ne možeš brojati dva puta zaredom. Brojanje se vraća na **1**.",
+            error_message = (
+                "Ne možeš brojati dva puta zaredom; brojanje je vraćeno na **1**."
             )
         else:
             state.update({"next": expected + 1, "last_user_id": ctx.author.id})
@@ -7181,15 +7330,24 @@ async def counting(ctx: commands.Context, broj: int = None):
                 next_number=broj + 1,
                 author_mention=ctx.author.mention,
             )
+    if error_message:
+        embed = discord.Embed(
+            description="> 🔄 Brojanje se nastavlja od **1**.",
+            color=_LP,
+        )
     await send_counting_reply(ctx, embed)
+    if error_message:
+        await send_private_game_notice(ctx, error_message)
 
 @bot.command(name="toplo-hladno")
 async def toplo_hladno(ctx: commands.Context, pogodak: int = None):
     if not await check_kanal(ctx, "toplo_hladno"):
         return
     channel_id = ctx.channel.id
+    lock = HOT_COLD_LOCKS.setdefault(channel_id, asyncio.Lock())
     if pogodak is None:
-        HOT_COLD_GAMES[channel_id] = random.randint(1, 100)
+        async with lock:
+            HOT_COLD_GAMES[channel_id] = random.randint(1, 100)
         await send_game_embed(
             ctx,
             game_embed(
@@ -7204,46 +7362,53 @@ async def toplo_hladno(ctx: commands.Context, pogodak: int = None):
         )
         return
     if not 1 <= pogodak <= 100:
-        await send_game_embed(
+        await send_private_game_notice(
             ctx,
-            game_embed(
-                "🌡️ Toplo-hladno",
-                ["> ❌ Broj mora biti između **1 i 100**."],
-                "Pokušaj ponovo",
-            ),
-            "toplo_hladno",
+            "Broj za Toplo-hladno mora biti između **1 i 100**.",
         )
         return
-    target = HOT_COLD_GAMES.setdefault(channel_id, random.randint(1, 100))
-    if pogodak == target:
-        HOT_COLD_GAMES.pop(channel_id, None)
-        await send_game_embed(
-            ctx,
-            game_embed(
+    async with lock:
+        target = HOT_COLD_GAMES.get(channel_id)
+        if target is None:
+            error_message = (
+                "Nema aktivne runde. Pokreni je prvo komandom `.toplo-hladno`."
+            )
+            result_embed = None
+        elif pogodak == target:
+            HOT_COLD_GAMES.pop(channel_id, None)
+            error_message = None
+            result_embed = game_embed(
                 "🌡️ Toplo-hladno",
                 [
                     f"> 🎉 Tačan pogodak: **{target}**!",
                     "> Nova runda počinje sa `.toplo-hladno`.",
                 ],
                 "Čestitamo!",
-            ),
-            "toplo_hladno",
-        )
+            )
+        else:
+            error_message = None
+            razlika = abs(target - pogodak)
+            temperatura = (
+                "🔥 VRELO" if razlika <= 5
+                else "🌡️ Toplo" if razlika <= 15
+                else "❄️ Hladno"
+            )
+            smjer = "veći" if pogodak < target else "manji"
+            result_embed = game_embed(
+                "🌡️ Toplo-hladno",
+                [
+                    f"> 🎯 Tvoj broj: **{pogodak}**",
+                    f"> {temperatura}",
+                    f"> Pokušaj ponovo sa brojem koji je **{smjer}**.",
+                ],
+                "Runda je aktivna",
+            )
+    if error_message:
+        await send_private_game_notice(ctx, error_message)
         return
-    razlika = abs(target - pogodak)
-    temperatura = "🔥 VRELO" if razlika <= 5 else "🌡️ Toplo" if razlika <= 15 else "❄️ Hladno"
-    smjer = "veći" if pogodak < target else "manji"
     await send_game_embed(
         ctx,
-        game_embed(
-            "🌡️ Toplo-hladno",
-            [
-                f"> 🎯 Tvoj broj: **{pogodak}**",
-                f"> {temperatura}",
-                f"> Pokušaj ponovo sa brojem koji je **{smjer}**.",
-            ],
-            "Runda je aktivna",
-        ),
+        result_embed,
         "toplo_hladno",
     )
 
@@ -7252,79 +7417,88 @@ async def kaladont(ctx: commands.Context, rijec: str = None):
     if not await check_kanal(ctx, "kaladont"):
         return
     channel_id = ctx.channel.id
-    game = KALADONT_GAMES.get(channel_id)
-    if not rijec:
-        KALADONT_GAMES[channel_id] = {
-            "last": None,
-            "last_author_id": None,
-            "used": set(),
-        }
-        await send_kaladont_embed(ctx, game_embed(
-            "🔤 Kaladont",
-            ["> Nova runda je počela!", "> Prva osoba šalje riječ komandom `.kaladont <riječ>`.", "> Riječ mora imati najmanje 2 slova.", "> Isti igrač ne može igrati dva puta zaredom."],
-            "Ako riječ završava na „ka“, igrač gubi",
-        ))
+    lock = KALADONT_LOCKS.setdefault(channel_id, asyncio.Lock())
+    error_message = None
+    result_embed = None
+    async with lock:
+        game = KALADONT_GAMES.get(channel_id)
+        if not rijec:
+            KALADONT_GAMES[channel_id] = {
+                "last": None,
+                "last_author_id": None,
+                "used": set(),
+            }
+            result_embed = game_embed(
+                "🔤 Kaladont",
+                [
+                    "> Nova runda je počela!",
+                    "> Prvi igrač sada šalje običnu riječ, bez `.kaladont`.",
+                    "> Svaka naredna riječ mora početi sa posljednja dva slova prethodne.",
+                    "> Isti igrač ne može igrati dva puta zaredom.",
+                ],
+                "Ako riječ završava na „ka“, igrač gubi",
+            )
+        else:
+            rijec = rijec.lower().strip()
+            direct_message = bool(
+                ctx.message
+                and not ctx.message.content.startswith(BOT_PREFIX)
+            )
+            if game is None and direct_message:
+                error_message = (
+                    "Nema aktivne runde. Pokreni je prvo komandom `.kaladont`."
+                )
+            elif len(rijec) < 2 or not rijec.isalpha():
+                error_message = (
+                    "Riječ mora sadržati samo slova i imati najmanje 2 slova."
+                )
+            elif not is_known_bhs_word(rijec):
+                error_message = (
+                    f"Riječ **{rijec.upper()}** nije prepoznata kao B/H/S riječ. "
+                    "Unesi stvarnu riječ."
+                )
+            else:
+                if game is None:
+                    game = {"last": None, "last_author_id": None, "used": set()}
+                    KALADONT_GAMES[channel_id] = game
+                game.setdefault("used", set())
+                if game.get("last") and game.get("last_author_id") == ctx.author.id:
+                    error_message = (
+                        "Sačekaj da drugi član pošalje riječ; isti igrač ne može "
+                        "igrati dva puta zaredom."
+                    )
+                elif rijec in game["used"]:
+                    error_message = "Ta riječ je već iskorištena. Probaj drugu."
+                elif game["last"] and not rijec.startswith(game["last"][-2:]):
+                    error_message = (
+                        f"Riječ mora početi sa **{game['last'][-2:].upper()}**."
+                    )
+                else:
+                    game["used"].add(rijec)
+                    game["last"] = rijec
+                    game["last_author_id"] = ctx.author.id
+                    if rijec.endswith("ka"):
+                        KALADONT_GAMES.pop(channel_id, None)
+                        poruka = [
+                            f"> 💥 {ctx.author.mention} je poslao/la **{rijec.upper()}**.",
+                            "> Riječ se završava na „KA“ — runda je završena!",
+                        ]
+                    else:
+                        poruka = [
+                            f"> ✅ {ctx.author.mention}: **{rijec.upper()}**",
+                            f"> Sljedeća riječ počinje sa **{rijec[-2:].upper()}**.",
+                        ]
+                    result_embed = game_embed(
+                        "🔤 Kaladont",
+                        poruka,
+                        "Nastavi riječima direktno u kanalu • nova runda: .kaladont",
+                    )
+
+    if error_message:
+        await send_private_game_notice(ctx, error_message)
         return
-    rijec = rijec.lower().strip()
-    if len(rijec) < 2 or not rijec.isalpha():
-        await send_kaladont_embed(ctx, game_embed(
-            "🔤 Kaladont",
-            ["> ❌ Riječ mora sadržati samo slova i imati najmanje 2 slova."],
-            "Primjer: .kaladont more",
-        ))
-        return
-    if not is_known_bhs_word(rijec):
-        await send_kaladont_embed(ctx, game_embed(
-            "🔤 Kaladont",
-            [f"> ❌ Riječ **{rijec.upper()}** nije pronađena u B/H/S rječniku.",
-             "> Unesi stvarnu riječ, bez izmišljanja slova."],
-            "Riječ nije prihvaćena",
-        ))
-        return
-    if game is None:
-        game = {"last": None, "last_author_id": None, "used": set()}
-        KALADONT_GAMES[channel_id] = game
-    game.setdefault("used", set())
-    if game.get("last") and game.get("last_author_id") == ctx.author.id:
-        await send_kaladont_embed(ctx, game_embed(
-            "🔤 Kaladont",
-            [f"> ⏳ {ctx.author.mention}, sačekaj da drugi član pošalje riječ.",
-             "> Isti igrač ne može igrati dva puta zaredom."],
-            "Red je na drugom igraču",
-        ))
-        return
-    if rijec in game["used"]:
-        await send_kaladont_embed(ctx, game_embed(
-            "🔤 Kaladont",
-            [f"> ❌ {ctx.author.mention}, ta riječ je već iskorištena."],
-            "Probaj drugu riječ",
-        ))
-        return
-    if game["last"] and not rijec.startswith(game["last"][-2:]):
-        await send_kaladont_embed(ctx, game_embed(
-            "🔤 Kaladont",
-            [f"> ❌ Riječ mora početi sa **{game['last'][-2:].upper()}**."],
-            "Kaladont pravilo",
-        ))
-        return
-    game["used"].add(rijec)
-    game["last"] = rijec
-    game["last_author_id"] = ctx.author.id
-    if rijec.endswith("ka"):
-        KALADONT_GAMES.pop(channel_id, None)
-        poruka = [
-            f"> 💥 {ctx.author.mention} je poslao/la **{rijec.upper()}**.",
-            "> Riječ se završava na „KA“ — runda je završena!",
-        ]
-    else:
-        poruka = [
-            f"> ✅ {ctx.author.mention}: **{rijec.upper()}**",
-            f"> Sljedeća riječ počinje sa **{rijec[-2:].upper()}**.",
-        ]
-    await send_kaladont_embed(
-        ctx,
-        game_embed("🔤 Kaladont", poruka, "Nova runda: .kaladont"),
-    )
+    if result_embed:
+        await send_kaladont_embed(ctx, result_embed)
 
 # ══════════════════════════════════════════════
 #   MONIKA — kontrola zabavnog razgovora
@@ -7426,26 +7600,41 @@ async def giveaways(ctx: commands.Context):
     save_data(data)
     GIVEAWAY_TASKS[giveaway_id] = asyncio.create_task(finish_giveaway(giveaway_id))
 
+PORUKA_LAST_ANNOUNCEMENT = {}
+PORUKA_ANNOUNCEMENT_COOLDOWN_SECONDS = 300
+
 @bot.command(name="poruka")
 async def poruka(
     ctx: commands.Context,
     server_link: str = None,
-    limit: int = 100,
 ):
-    """Vlasnik bota ili servera šalje najviše 100 pozivnica u DM."""
-    async def reply(content: str, **kwargs):
+    """Objavi jednu pozivnicu u kanalu; nikome ne šalje neželjene DM-ove."""
+    async def reply(content: str):
         if ctx.interaction is not None:
-            # Slash verzija već je odgođena privatno. Uredi tu potvrdu umjesto
-            # da pravi dodatnu javnu poruku ili ostavi indikator učitavanja.
-            kwargs.pop("delete_after", None)
             return await ctx.interaction.edit_original_response(
                 content=content,
-                embed=kwargs.get("embed"),
             )
-        return await ctx.send(content, **kwargs)
+        try:
+            return await ctx.author.send(
+                content,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except discord.Forbidden:
+            if ctx.message:
+                try:
+                    await ctx.message.add_reaction("🔒")
+                except discord.HTTPException:
+                    pass
+            return None
+        except discord.HTTPException as exc:
+            print(
+                f"[PORUKA] Privatna potvrda nije poslana: "
+                f"HTTP {exc.status}, Discord kod {exc.code}."
+            )
+            return None
 
     if ctx.guild is None:
-        await reply("Komandu `.poruka` pokreni u kanalu servera.", delete_after=8)
+        await reply("Komandu `.poruka` pokreni u kanalu servera.")
         return
 
     try:
@@ -7455,25 +7644,14 @@ async def poruka(
         print(f"[PORUKA] Provjera vlasnika bota nije uspjela: {exc}")
     is_guild_owner = ctx.author.id == ctx.guild.owner_id
     if not (is_bot_owner or is_guild_owner):
-        await reply(
-            "Ovu komandu može koristiti vlasnik bota ili vlasnik ovog servera.",
-            delete_after=12,
-        )
+        await reply("Ovu komandu može koristiti vlasnik bota ili vlasnik servera.")
         return
 
     if not server_link:
         await reply(
-            "Upotreba: `.poruka <link-servera> [broj 1-100]` ili "
-            "`/poruka server_link:<link> limit:<broj>`.\n"
-            "Primjer: `.poruka https://discord.gg/tvoj-link 100`",
-            delete_after=12,
-        )
-        return
-    if not 1 <= limit <= 100:
-        await reply(
-            "Broj mora biti između **1 i 100**. Discord može odbiti DM "
-            "članovima koji ne dozvoljavaju privatne poruke.",
-            delete_after=12,
+            "Upotreba: `.poruka <Discord invite link>` ili "
+            "`/poruka server_link:<link>`. Komanda objavljuje samo jednu poruku "
+            "u trenutnom kanalu."
         )
         return
 
@@ -7490,8 +7668,17 @@ async def poruka(
     ):
         await reply(
             "Link mora biti Discord invite link, npr. "
-            "`https://discord.gg/tvoj-link`.",
-            delete_after=12,
+            "`https://discord.gg/tvoj-link`."
+        )
+        return
+
+    now = asyncio.get_running_loop().time()
+    last_post = PORUKA_LAST_ANNOUNCEMENT.get(ctx.guild.id, 0)
+    remaining = PORUKA_ANNOUNCEMENT_COOLDOWN_SECONDS - (now - last_post)
+    if remaining > 0:
+        await reply(
+            f"Pozivnica je nedavno objavljena. Sačekaj još **{int(remaining) + 1} "
+            "sekundi** prije sljedeće objave."
         )
         return
 
@@ -7570,84 +7757,46 @@ async def poruka(
         embed.set_thumbnail(url=ctx.guild.icon.url)
     embed.set_footer(text=f"{BOT_NAME} {VERSION} • pozivnica")
 
-    status_message = await reply(
-        f"Počinjem slati pozivnicu u DM za najviše **{limit} članova** "
-        f"servera **{ctx.guild.name}**..."
-    )
-    poslato = 0
-    preskoceno = 0
-    pokusano = 0
-    dm_odbijeno = 0
-    dm_http_greske = 0
-    prva_dm_greska = None
-    ucitavanje_greska = None
     try:
-        async for member in ctx.guild.fetch_members(limit=None):
-            if member.bot:
-                preskoceno += 1
-                continue
-            if pokusano >= limit:
-                break
-            pokusano += 1
-            try:
-                await member.send(embed=embed)
-                poslato += 1
-            except discord.Forbidden:
-                # Discord često odbija DM kada član ima zatvorene privatne
-                # poruke ili bot nema dozvolu da mu se javi.
-                dm_odbijeno += 1
-            except discord.HTTPException as exc:
-                dm_http_greske += 1
-                if prva_dm_greska is None:
-                    prva_dm_greska = f"HTTP {exc.status}, Discord kod {exc.code}"
-                print(
-                    f"[PORUKA] Slanje DM-a nije uspjelo: "
-                    f"HTTP {exc.status}, Discord kod {exc.code}."
-                )
-            # Drži slanje ispod Discordovog DM rate limita.
-            await asyncio.sleep(0.25)
-    except (discord.Forbidden, discord.HTTPException) as exc:
-        ucitavanje_greska = exc
-        print(f"[PORUKA] Učitavanje članova nije uspjelo: {exc}")
+        await ctx.channel.send(
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    except discord.Forbidden:
+        await reply(
+            "Bot nema dozvolu da objavi pozivnicu u ovom kanalu. "
+            "Provjeri dozvole Send Messages i Embed Links."
+        )
+        return
+    except discord.HTTPException as exc:
+        print(
+            f"[PORUKA] Objavljivanje invite poruke nije uspjelo: "
+            f"HTTP {exc.status}, Discord kod {exc.code}."
+        )
+        await reply("Discord nije prihvatio objavu. Pokušaj ponovo kasnije.")
+        return
 
-    if ucitavanje_greska and poslato == 0 and preskoceno == 0:
-        final_text = (
-            "Nisam mogao učitati članove servera, pa poruka nije poslata. "
-            "U Discord Developer Portal uključi **Server Members Intent**, "
-            "sačuvaj promjenu i restartuj bota."
-        )
-    else:
-        final_text = (
-            f"Slanje završeno. Pokušano: **{pokusano}/{limit}**, poslato: "
-            f"**{poslato}**, botovi preskočeni: "
-            f"**{preskoceno}**, Discord odbio privatnu poruku: **{dm_odbijeno}**."
-        )
-        if dm_http_greske:
-            final_text += (
-                f" Ostale HTTP greške pri slanju: **{dm_http_greske}**"
-                + (f" (prva: {prva_dm_greska})." if prva_dm_greska else ".")
-            )
-        if ucitavanje_greska:
-            final_text += " Učitavanje članova je prekinuto; dio članova možda nije obrađen."
-    await status_message.edit(content=final_text)
+    PORUKA_LAST_ANNOUNCEMENT[ctx.guild.id] = now
+    await reply(
+        f"Pozivnica je objavljena jednom u {ctx.channel.mention}. "
+        "Nijednom članu nije poslan privatni DM."
+    )
 
 @bot.tree.command(
     name="poruka",
-    description="Vlasnik šalje pozivnicu u DM do 100 članova servera",
+    description="Vlasnik objavljuje jednu pozivnicu u ovom kanalu",
 )
 @app_commands.describe(
     server_link="Discord invite link servera",
-    limit="Maksimalan broj članova (1–100, podrazumijevano 100)",
 )
 async def poruka_slash(
     interaction: discord.Interaction,
     server_link: str,
-    limit: app_commands.Range[int, 1, 100] = 100,
 ):
-    """Slash ulaz za postojeću, vlasniku ograničenu .poruka funkciju."""
+    """Slash ulaz za jednu, vlasniku servera/bota ograničenu objavu."""
     await interaction.response.defer(ephemeral=True, thinking=True)
     ctx = await commands.Context.from_interaction(interaction)
-    await poruka.callback(ctx, server_link=server_link, limit=limit)
+    await poruka.callback(ctx, server_link=server_link)
 
 @bot.tree.command(name="opis", description="[OWNER] Objavi kompletno uputstvo za korištenje bota")
 async def opis_slash(interaction: discord.Interaction):
@@ -7772,11 +7921,9 @@ async def opis_slash(interaction: discord.Interaction):
             title="• MONIKA BOT — Mini-igre 6/7",
             description=(
                 "> **Igre za kanal i članove**\n"
-                "> `.counting 1` — Započni brojanje; zatim se šalje sljedeći broj.\n"
-                "> `.toplo-hladno` — Zamisli broj od 1 do 100 i pogađaj.\n"
-                "> `.toplo-hladno <broj>` — Pošalji pokušaj u aktivnoj rundi.\n"
-                "> `.kaladont` — Pokreni igru riječima.\n"
-                "> `.kaladont <riječ>` — Pošalji riječ koja počinje zadnja dva slova.\n"
+                "> `.counting 1` — Započni brojanje; zatim šalji samo sljedeći broj.\n"
+                "> `.toplo-hladno` — Pokreni rundu; zatim šalji brojeve od 1 do 100.\n"
+                "> `.kaladont` — Pokreni rundu; zatim šalji riječi direktno u kanal.\n"
                 "> `.pijte` — Pokreni zabavnu poruku za društvo.\n"
                 "> `.film` — Pokreni izbor filma.\n"
                 "> `.istina` — Dobij pitanje istine.\n"
@@ -7857,9 +8004,9 @@ async def komande_slash(interaction: discord.Interaction):
             "> ",
             "> Mini-igre:",
             "> `.casino [coin|slot] <ulog>`",
-            "> `.counting [broj]`",
-            "> `.toplo-hladno [broj]`",
-            "> `.kaladont [riječ]`",
+            "> `.counting 1` — nakon toga šalji samo broj",
+            "> `.toplo-hladno` — nakon toga šalji samo broj",
+            "> `.kaladont` — nakon toga šalji samo riječ",
             "> `.ekonomija`",
             "> ",
             "> Ljubav: `.veza` · `.profil` · `.brak` · `.prsten` · `.svadba`",
@@ -7879,10 +8026,11 @@ async def igre_slash(interaction: discord.Interaction):
     e = game_embed(
         "🎮 Mini-igre",
         [
-            "> `.casino coin 50` ili `.casino slot 50` — drugi tekst dobija 🎰 reakciju",
-            "> `.counting 1` — zatim šalji brojeve; tekst dobija 🔢 reakciju",
-            "> `.toplo-hladno` — šalji brojeve 1–100; tekst dobija 🔢 reakciju",
-            "> `.kaladont` — zatim šalji riječi direktno u kanal",
+            "> Casino: koristi `.casino coin 50` ili `.casino slot 50`.",
+            "> Brojanje: `.counting 1`, pa samo brojevi u podešenom kanalu.",
+            "> Toplo-hladno: `.toplo-hladno`, pa samo brojevi u podešenom kanalu.",
+            "> Kaladont: `.kaladont`, pa samo riječi u podešenom kanalu.",
+            "> Greške se šalju privatno autoru; valjani potezi ostaju u kanalu igre.",
         ],
         "Prefix svih igara: .",
     )

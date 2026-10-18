@@ -1,4 +1,4 @@
-# MONIKA BOT Discord Bot — v4.5
+# MONIKA BOT Discord Bot — v4.6
 
 Ovo je kompletan Discord bot sa ljubavnim sistemom, virtuelnom ekonomijom,
 kućama za parove, ribolovom, rang-listama, welcome panelom i Info/GWS & Events
@@ -13,10 +13,10 @@ panelom.
 3. Instaliraj zavisnosti komandom `python -m pip install -r requirements.txt`.
 4. Pokreni projekat sa `python main.py` (ili postavi tu komandu kao Run/Workflow).
    `main.py` pokreće `bot.py`.
-5. U konzoli provjeri da piše `Registrovano slash komandi: 27`.
+5. U konzoli provjeri da piše `Registrovano slash komandi: 28`.
 
 Komande za podešavanje koriste slash `/`, a obične članske komande prefix `.`.
-Priloženi snimak greške je sačuvan kao `reference/discord-error.png`; bot ga ne koristi.
+Slike greške iz razgovora nisu potrebne za rad bota i nisu u ovom ZIP-u.
 
 ## 1. Instalacija
 
@@ -157,8 +157,9 @@ Welcome dugme radi ovako:
 - iskorišteni klikovi se čuvaju u `ljubav_data.json`
 
 Ako korisnik ima zatvorene privatne poruke, Discord ne dozvoljava botu da ih
-otvori. U tom slučaju `.pomoc` prikazuje pomoć u kanalu, a `.poruka` u završnom
-izvještaju odvojeno prikazuje Discord odbijene DM-ove i druge HTTP greške.
+otvori. U tom slučaju `.pomoc` prikazuje pomoć u kanalu, a `.poruka` šalje
+privatnu potvrdu autoru komande. Pozivnica se objavljuje jednom u kanalu u kojem
+je komanda pokrenuta; bot ne šalje pozivnice masovno u DM.
 
 ## 5. Podešavanje Info/GWS & Events panela
 
@@ -279,21 +280,41 @@ Svi embed-i koriste sivo-crnu dark boju (`#2B2D31`) i kompaktan prikaz bez `>` o
 /embed
 /setreport
 /poruka
+/sync
 /setmonika
 /iskljuci-moniku
 /opis
+/komande
+/igre
 ```
 
-Za ograničavanje komandi i mini-igara na određene kanale koristi:
+Komande se mogu ograničiti na svoje kanale. Podesi svaki tip jednom kao
+administrator; primjer za igre:
 
 ```text
 /setkanal ljubav #ljubav
 /setkanal pecanje #pecanje
+/setkanal ekonomija #ekonomija
+/setkanal kuca #kuca
+/setkanal zabava #zabava
+/setkanal rangliste #rangliste
 /setkanal counting #counting
 /setkanal toplo_hladno #toplo-hladno
 /setkanal kaladont #kaladont
 /setkanal casino #casino
 ```
+
+Ljubavne, ribolovne, ekonomske, kućne, zabavne i rang-lista prefix komande
+zatim rade samo u svom podešenom kanalu. Administrativne slash komande ostaju
+dostupne administratorima i prikazuju privatne potvrde.
+
+Kad je kanal igre podešen, igra prima obične brojeve/riječi samo u tom kanalu.
+U Kaladontu pokreni `.kaladont` jednom, pa igrači šalju riječi direktno
+u `#kaladont` — bez ponavljanja komande. Za Toplo-hladno pokreni
+`.toplo-hladno`, pa šalji brojeve; za counting pokreni `.counting 1`, pa
+svaki sljedeći broj pošalji kao običnu poruku. Tačni potezi i javni rezultat
+ostaju vidljivi u kanalu igre; greške i obavijesti o pogrešnom kanalu šalju se
+privatno autoru, uz neutralnu reakciju samo ako su mu DM poruke zatvorene.
 
 `/setlogin` više ne zaključava komande. Postavi kanal za evidencijske embedove
 dolasaka članova i ban/unban događaja. Nakon ažuriranja pokreni `/setlogin`
@@ -335,8 +356,9 @@ Ako kanal nije naveden, koristi se kanal u kojem je komanda pokrenuta.
 
 `/setreport`, `/setpomoc` i `/setlogin` su vidljive bot-vlasniku i server
 administratorima. Nakon izmjene, pri pokretanju konzola ispisuje broj
-sinhronizovanih slash komandi i njihova imena. Ako se log ne poklapa s ovim
-paketom, vjerovatno se pokreće stara kopija bota.
+sinhronizovanih slash komandi i njihova imena. `/sync` ručno osvježava slash
+komande bez restartovanja procesa; koristi ga vlasnik bota ili administrator.
+Ako se log ne poklapa s ovim paketom, vjerovatno se pokreće stara kopija bota.
 
 Mini-igre se više ne prepoznaju automatski po nazivu kanala. Skraćeni unos
 bez prefiksa radi samo u kanalu koji je administrator podesio za tu igru.
@@ -390,24 +412,24 @@ Prefix je:
 
 ### Vlasnička pozivna poruka
 
-Vlasnik bota ili servera može poslati pozivnicu u privatne poruke najviše
-100 članovima po pokretanju:
+Vlasnik bota ili servera može objaviti jednu pozivnicu u kanalu u kojem pokrene
+komandu. Radi zaštite od neželjenih masovnih DM-ova, bot ne šalje pozivnice
+privatno članovima:
 
 ```text
-.poruka https://discord.gg/tvoj-link 100
+.poruka https://discord.gg/tvoj-link
 ```
 
 Ista funkcija radi i kao slash komanda:
 
 ```text
-/poruka server_link:https://discord.gg/tvoj-link limit:100
+/poruka server_link:https://discord.gg/tvoj-link
 ```
 
-Prefix i slash komandu mogu koristiti vlasnik bota ili vlasnik servera. Poruka sadrži pozivni
-link i pregled glavnih komandi. Broj je opcionalan (podrazumijevano 100; raspon
-1–100). Botovi se preskaču. Završni izvještaj razdvaja poslato, Discord odbijene
-DM-ove i druge HTTP greške. Bot ne može zaobići članske postavke privatnosti.
-`.poruka` i `/poruka` nisu ograničene na evidencijski kanal `/setlogin`.
+Prefix i slash komandu mogu koristiti vlasnik bota ili vlasnik servera. U
+objavljenoj poruci su pozivni link i pregled glavnih komandi. Pozivnica može
+biti objavljena najviše jednom u pet minuta po serveru; potvrda/greška se šalje
+privatno autoru komande.
 
 ### Ljubav i veze
 
@@ -464,9 +486,9 @@ Prefix svih komandi je tačka (`.`):
 
 - `.ekonomija` — pregled gotovine, banke i ekonomskih komandi
 - `.casino` — `coin` ili `slot`, minimalni ulog je 10 novčića
-- `.counting 1` — brojanje po kanalu; bot odgovara direktno na poruku s brojem
-- `.toplo-hladno` — pogodi broj od 1 do 100
-- `.kaladont` — riječ mora početi sa posljednja dva slova prethodne riječi
+- `.counting 1` — pokreni brojanje, zatim šalji samo sljedeći broj
+- `.toplo-hladno` — pokreni rundu, zatim šalji brojeve od 1 do 100
+- `.kaladont` — pokreni rundu, zatim šalji obične riječi bez prefiksa
 
 Stanje svake igre je odvojeno po Discord kanalu. Counting prikazuje prihvaćeni
 broj, sljedeći broj i tagovanog člana u tamnom embed-u, kao odgovor na poruku s brojem.
@@ -478,13 +500,17 @@ Kaladont odgovara direktno na svaku poruku u svom kanalu, provjerava riječ,
 taguje člana i ispisuje riječi velikim slovima. Stikeri iz priloženog lista
 su izrezani i ugrađeni u odgovore igara; welcome embedovi nisu mijenjani.
 
-U podešenim kanalima za `counting`, `toplo-hladno`, `kaladont` ili
-`casino` moguće je slati i skraćeni unos bez prefixa:
+U kanalima podešenim preko `/setkanal` za `counting`, `toplo-hladno`,
+`kaladont` ili `casino` može se slati unos bez prefixa:
 
-- `counting` — pošalji samo `1`, `2`, `3`...; tekst dobija 🔢 reakciju
-- `toplo-hladno` — prvo pokreni `.toplo-hladno`, zatim šalji brojeve `44`, `55`...; tekst dobija 🔢 reakciju
+- `counting` — pokreni `.counting 1`, pa šalji samo `2`, `3`...
+- `toplo-hladno` — pokreni `.toplo-hladno`, pa šalji brojeve `44`, `55`...
 - `kaladont` — prvo pokreni `.kaladont`, zatim šalji riječi direktno u kanal
-- `casino` — pošalji `coin 50` ili `slot 50`; ostali unosi dobijaju 🎰 reakciju
+- `casino` — pošalji `coin 50` ili `slot 50`
+
+Pogrešni unosi i poruke u pogrešnom kanalu ne objavljuju se javno: bot šalje
+objašnjenje privatno pošiljaocu. Tačni potezi i javna stanja igre ostaju u
+kanalu da svi igrači mogu pratiti red.
 
 Slash komande `/komande` i `/igre` se automatski registruju nakon pokretanja
 bota i prikazuju pregled prefix komandi i mini-igara.
@@ -607,7 +633,7 @@ kopiju.
 Provjereno:
 
 - 79 prefix komandi
-- 27 slash komandi registrovanih u kodu
+- 28 slash komandi registrovanih u kodu, uključujući ručni `/sync`
 - nema dupliranih naziva komandi
 - Python sintaksa prolazi bez greške
 - nema hardkodovanog Discord tokena
@@ -616,6 +642,8 @@ Provjereno:
 - pri pokretanju se ispisuje stvarni rezultat slash komandi sinhronizovanih sa Discordom
 - interaktivna dugmad koriste Discord custom emoji-je, a panel komande ažuriraju postojeću objavu umjesto da je dupliraju
 - counting stanje se čuva trajno, a tačan unos se vraća kao reply embed
+- greške mini-igara i poruke o pogrešnom kanalu šalju se privatno autoru
+- `/poruka` objavljuje jednu pozivnicu u kanalu uz cooldown; ne šalje masovne DM-ove
 - Kaladont mijenja dvije priložene slike naizmjenično; Info panel ima dugme za sve komande
 - `/setlogin` postavlja kanal za logove dolazaka, banova i unbanova; više ne ograničava komande
 - `.evidencija` i `/evidencija` prikazuju poruke i voice vrijeme po kanalu; `/topaktivnost` rangira članove
