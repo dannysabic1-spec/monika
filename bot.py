@@ -371,6 +371,7 @@ discord.Embed.add_field = _embed_add_field_with_icon
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(DATA_DIR, "ljubav_data.json")
 DATA_BACKUP_FILE = f"{DATA_FILE}.bak"
+PANEL_POST_LOCK = asyncio.Lock()
 
 def load_data() -> dict:
     defaults = {
@@ -388,6 +389,7 @@ def load_data() -> dict:
         "monika": {},
         "pomoc_usage": {},
         "giveaways": {},
+        "panel_messages": {},
     }
     for data_path in (DATA_FILE, DATA_BACKUP_FILE):
         if not os.path.exists(data_path):
@@ -646,6 +648,65 @@ def get_support(data: dict, guild_id: int) -> dict:
         if k not in cfg:
             cfg[k] = v
     return cfg
+
+def message_has_component(message: discord.Message, custom_id: str) -> bool:
+    """Provjeri da li botova poruka sadrži dugme određenog panela."""
+    return any(
+        getattr(component, "custom_id", None) == custom_id
+        for row in getattr(message, "components", ())
+        for component in getattr(row, "children", ())
+    )
+
+async def upsert_panel_message(
+    target: discord.TextChannel,
+    guild_id: int,
+    panel_key: str,
+    component_id: str,
+    embed: discord.Embed,
+    view: discord.ui.View,
+) -> tuple[discord.Message, bool]:
+    """Ažuriraj postojeći panel umjesto slanja nove kopije."""
+    async with PANEL_POST_LOCK:
+        data = load_data()
+        guild_panels = data.setdefault("panel_messages", {}).setdefault(
+            str(guild_id), {}
+        )
+        storage_key = f"{panel_key}:{target.id}"
+        message = None
+        saved_message_id = guild_panels.get(storage_key)
+
+        if saved_message_id:
+            try:
+                message = await target.fetch_message(int(saved_message_id))
+            except discord.NotFound:
+                guild_panels.pop(storage_key, None)
+
+        if message is None and bot.user is not None:
+            async for candidate in target.history(limit=100):
+                if (
+                    candidate.author.id == bot.user.id
+                    and message_has_component(candidate, component_id)
+                ):
+                    message = candidate
+                    break
+
+        updated = False
+        if message is not None:
+            try:
+                message = await message.edit(embed=embed, view=view)
+                updated = True
+            except discord.NotFound:
+                # Poruka je sigurno obrisana; tek tada je bezbjedno poslati novu.
+                message = None
+
+        if message is None:
+            # Namjerno nema ponovnog slanja nakon HTTP greške: Discord je možda
+            # prihvatio prvo slanje iako odgovor nije stigao do bota.
+            message = await target.send(embed=embed, view=view)
+
+        guild_panels[storage_key] = message.id
+        save_data(data)
+        return message, updated
 
 def get_monika(data: dict, guild_id: int) -> dict:
     """Podešavanje Monika razgovora po serveru."""
@@ -1450,16 +1511,32 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff prijava"):
             return
 
         embed = discord.Embed(
-            title="📋 Nova Staff prijava",
+            title=f"{CUSTOM_EMOJI['file']} Nova Staff prijava",
             description=(
                 f"Prijava korisnika {interaction.user.mention}"
             ),
             color=_LP,
         )
-        embed.add_field(name="📌 Godine", value=str(self.godine.value), inline=True)
-        embed.add_field(name="🕒 Aktivnost", value=str(self.aktivnost.value), inline=False)
-        embed.add_field(name="🎓 Prethodno iskustvo", value=str(self.iskustvo.value), inline=False)
-        embed.add_field(name="💡 Motivacija", value=str(self.motivacija.value), inline=False)
+        embed.add_field(
+            name=f"{CUSTOM_EMOJI['calendar']} Godine",
+            value=str(self.godine.value),
+            inline=True,
+        )
+        embed.add_field(
+            name=f"{CUSTOM_EMOJI['clock']} Aktivnost",
+            value=str(self.aktivnost.value),
+            inline=False,
+        )
+        embed.add_field(
+            name=f"{CUSTOM_EMOJI['book']} Prethodno iskustvo",
+            value=str(self.iskustvo.value),
+            inline=False,
+        )
+        embed.add_field(
+            name=f"{CUSTOM_EMOJI['info']} Motivacija",
+            value=str(self.motivacija.value),
+            inline=False,
+        )
         embed.set_footer(text=f"{BOT_NAME} {VERSION} • Staff prijava")
 
         staff_role = interaction.guild.get_role(cfg.get("staff_role_id")) if cfg.get("staff_role_id") else None
@@ -1480,7 +1557,7 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff prijava"):
             return
 
         await interaction.response.send_message(
-            "✅ Prijava je poslata staff timu. Hvala ti!",
+            f"{CUSTOM_EMOJI['check']} Prijava je poslata staff timu. Hvala ti!",
             ephemeral=True,
         )
 
@@ -1490,7 +1567,7 @@ class StaffPanelView(discord.ui.View):
 
     @discord.ui.button(
         label="Staff Apply",
-        emoji="📄",
+        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["file"]),
         style=discord.ButtonStyle.danger,
         custom_id="squad_staff_apply",
     )
@@ -1512,7 +1589,7 @@ class TicketCloseView(discord.ui.View):
 
     @discord.ui.button(
         label="Zatvori tiket",
-        emoji="🔒",
+        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["lock"]),
         style=discord.ButtonStyle.danger,
         custom_id="squad_ticket_close",
     )
@@ -1555,7 +1632,7 @@ class TicketCloseView(discord.ui.View):
             return
 
         await interaction.response.send_message(
-            "🔒 Tiket se zatvara...", ephemeral=True
+            f"{CUSTOM_EMOJI['lock']} Tiket se zatvara...", ephemeral=True
         )
         await asyncio.sleep(1)
         try:
@@ -1569,7 +1646,7 @@ class TicketPanelView(discord.ui.View):
 
     @discord.ui.button(
         label="Otvori Tiket",
-        emoji="🎟️",
+        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["ticket"]),
         style=discord.ButtonStyle.danger,
         custom_id="squad_ticket_open",
     )
@@ -1664,7 +1741,7 @@ class TicketPanelView(discord.ui.View):
             return
 
         embed = discord.Embed(
-            title="🎫 Otvoren tiket",
+            title=f"{CUSTOM_EMOJI['ticket']} Otvoren tiket",
             description=(
                 f"Dobrodošao/la {interaction.user.mention}.\n"
                 "Napiši kako možemo pomoći i sačekaj odgovor staff tima."
@@ -1679,7 +1756,7 @@ class TicketPanelView(discord.ui.View):
             view=TicketCloseView(),
         )
         await interaction.edit_original_response(
-            content=f"✅ Tvoj tiket je otvoren: {ticket_channel.mention}"
+            content=f"{CUSTOM_EMOJI['check']} Tvoj tiket je otvoren: {ticket_channel.mention}"
         )
 
 class ReportCloseView(discord.ui.View):
@@ -1688,7 +1765,7 @@ class ReportCloseView(discord.ui.View):
 
     @discord.ui.button(
         label="Zatvori report",
-        emoji="🔒",
+        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["lock"]),
         style=discord.ButtonStyle.danger,
         custom_id="squad_report_close",
     )
@@ -1717,7 +1794,10 @@ class ReportCloseView(discord.ui.View):
                 "Samo autor reporta ili staff može zatvoriti report.", ephemeral=True
             )
             return
-        await interaction.response.send_message("Report se zatvara...", ephemeral=True)
+        await interaction.response.send_message(
+            f"{CUSTOM_EMOJI['lock']} Report se zatvara...",
+            ephemeral=True,
+        )
         await asyncio.sleep(1)
         try:
             await interaction.channel.delete(reason="Report zatvoren")
@@ -1730,7 +1810,7 @@ class ReportPanelView(discord.ui.View):
 
     @discord.ui.button(
         label="Prijavi korisnika",
-        emoji="⚠️",
+        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["alert"]),
         style=discord.ButtonStyle.danger,
         custom_id="squad_report_open",
     )
@@ -1788,7 +1868,7 @@ class ReportPanelView(discord.ui.View):
             )
             return
         embed = discord.Embed(
-            title="Report je otvoren",
+            title=f"{CUSTOM_EMOJI['alert']} Report je otvoren",
             description=(
                 f"{interaction.user.mention}, ovdje napiši sve detalje prijave.\n"
                 "Staff vidi ovaj kanal i može ga zatvoriti kada se slučaj riješi."
@@ -1801,7 +1881,7 @@ class ReportPanelView(discord.ui.View):
             view=ReportCloseView(),
         )
         await interaction.edit_original_response(
-            content=f"✅ Tvoj report je otvoren: {report_channel.mention}"
+            content=f"{CUSTOM_EMOJI['check']} Tvoj report je otvoren: {report_channel.mention}"
         )
 
 # ══════════════════════════════════════════════
@@ -1907,7 +1987,7 @@ class GiveawayView(discord.ui.View):
         self.giveaway_id = giveaway_id
         button = discord.ui.Button(
             label="Učestvuj",
-            emoji="🎁",
+            emoji=component_custom_emoji(CUSTOM_EMOJI["gift"]),
             style=discord.ButtonStyle.success,
             custom_id=f"squad_giveaway_join:{giveaway_id}",
         )
@@ -2989,10 +3069,36 @@ async def info_postavi(interaction: discord.Interaction):
         embed.set_thumbnail(url=interaction.guild.icon.url)
     embed.set_footer(text=f"{BOT_NAME} {VERSION} • klikni za više informacija")
 
-    await interaction.response.send_message(
-        f"Info panel je poslat u {channel.mention}.", ephemeral=True
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        _message, updated = await upsert_panel_message(
+            channel,
+            interaction.guild.id,
+            "info",
+            "squad_info_details",
+            embed,
+            InfoView(),
+        )
+    except discord.Forbidden:
+        await interaction.edit_original_response(
+            content=(
+                "Ne mogu provjeriti ili ažurirati Info panel. Botu su potrebne "
+                "dozvole View Channel, Read Message History i Send Messages."
+            )
+        )
+        return
+    except discord.HTTPException:
+        await interaction.edit_original_response(
+            content=(
+                "Discord nije potvrdio slanje/ažuriranje Info panela. "
+                "Nisam ponovio slanje da ne bih napravio duplikat."
+            )
+        )
+        return
+    status = "ažuriran" if updated else "postavljen"
+    await interaction.edit_original_response(
+        content=f"Info panel je {status} u {channel.mention}."
     )
-    await channel.send(embed=embed, view=InfoView())
 
 @bot.tree.command(name="info-status", description="[ADMIN] Prikaži Info panel podešavanja")
 @app_commands.default_permissions(administrator=True)
@@ -3074,27 +3180,45 @@ async def staff_postavi(
         return
 
     embed = discord.Embed(
-        title="📋 STAFF PRIJAVA",
+        title=f"{CUSTOM_EMOJI['file']} STAFF PRIJAVA",
         description=(
             "Otvorene su prijave za Staff tim servera!\n"
-            "📌 Klikni dugme ispod i popuni svoje podatke.\n"
-            "🔒 Odgovori su privatni dok ne pošalješ prijavu."
+            f"{CUSTOM_EMOJI['hand']} Klikni dugme ispod i popuni svoje podatke.\n"
+            f"{CUSTOM_EMOJI['lock']} Odgovori su privatni dok ne pošalješ prijavu."
         ),
         color=_LP,
     )
     embed.set_footer(text=f"{BOT_NAME} • Staff Prijava")
+    await interaction.response.defer(ephemeral=True, thinking=True)
     try:
-        await target.send(embed=embed, view=StaffPanelView())
+        _message, updated = await upsert_panel_message(
+            target,
+            interaction.guild.id,
+            "staff",
+            "squad_staff_apply",
+            embed,
+            StaffPanelView(),
+        )
     except discord.Forbidden:
-        await interaction.response.send_message(
-            "Ne mogu poslati panel u taj kanal. Provjeri dozvole bota.",
-            ephemeral=True,
+        await interaction.edit_original_response(
+            content=(
+                "Ne mogu provjeriti ili ažurirati Staff panel. Botu su potrebne "
+                "dozvole View Channel, Read Message History i Send Messages."
+            )
+        )
+        return
+    except discord.HTTPException:
+        await interaction.edit_original_response(
+            content=(
+                "Discord nije potvrdio slanje/ažuriranje Staff panela. "
+                "Nisam ponovio slanje da ne bih napravio duplikat."
+            )
         )
         return
 
-    await interaction.response.send_message(
-        f"✅ Staff panel je postavljen u {target.mention}.",
-        ephemeral=True,
+    status = "ažuriran" if updated else "postavljen"
+    await interaction.edit_original_response(
+        content=f"{CUSTOM_EMOJI['check']} Staff panel je {status} u {target.mention}."
     )
 
 @bot.tree.command(name="ticket-podesi", description="[ADMIN] Podesi kategoriju i ulogu za tickete")
@@ -3156,27 +3280,45 @@ async def ticket_postavi(
     save_data(data)
 
     embed = discord.Embed(
-        title="🎫 Otvori Tiket",
+        title=f"{CUSTOM_EMOJI['ticket']} Otvori Tiket",
         description=(
             "Treba ti pomoć? Otvori tiket!\n"
-            "📩 Privatni kanal vide samo ti i staff.\n"
-            "📝 Opiši problem i sačekaj odgovor tima."
+            f"{CUSTOM_EMOJI['mail']} Privatni kanal vide samo ti i staff.\n"
+            f"{CUSTOM_EMOJI['file']} Opiši problem i sačekaj odgovor tima."
         ),
         color=_LP,
     )
     embed.set_footer(text=f"{BOT_NAME} • Ticket Sistem")
+    await interaction.response.defer(ephemeral=True, thinking=True)
     try:
-        await target.send(embed=embed, view=TicketPanelView())
+        _message, updated = await upsert_panel_message(
+            target,
+            interaction.guild.id,
+            "ticket",
+            "squad_ticket_open",
+            embed,
+            TicketPanelView(),
+        )
     except discord.Forbidden:
-        await interaction.response.send_message(
-            "Ne mogu poslati panel u taj kanal. Provjeri dozvole bota.",
-            ephemeral=True,
+        await interaction.edit_original_response(
+            content=(
+                "Ne mogu provjeriti ili ažurirati Ticket panel. Botu su potrebne "
+                "dozvole View Channel, Read Message History i Send Messages."
+            )
+        )
+        return
+    except discord.HTTPException:
+        await interaction.edit_original_response(
+            content=(
+                "Discord nije potvrdio slanje/ažuriranje Ticket panela. "
+                "Nisam ponovio slanje da ne bih napravio duplikat."
+            )
         )
         return
 
-    await interaction.response.send_message(
-        f"✅ Ticket panel je postavljen u {target.mention}.",
-        ephemeral=True,
+    status = "ažuriran" if updated else "postavljen"
+    await interaction.edit_original_response(
+        content=f"{CUSTOM_EMOJI['check']} Ticket panel je {status} u {target.mention}."
     )
 
 @bot.tree.command(name="embed", description="[ADMIN] Pošalji svoj tekst kao embed")
@@ -3272,29 +3414,53 @@ async def setreport(
         cfg["staff_role_id"] = uloga.id
     save_data(data)
     embed = discord.Embed(
-        title="Report sistem",
+        title=f"{CUSTOM_EMOJI['alert']} Report sistem",
         description=(
             "Prijavi problem, člana ili kršenje pravila privatno staff timu.\n"
             "Klik na dugme otvara kanal koji vide samo autor reporta i staff."
         ),
         color=_LP,
     )
-    embed.add_field(name="Kanal", value=kanal.mention, inline=True)
     embed.add_field(
-        name="Kategorija",
+        name=f"{CUSTOM_EMOJI['home']} Kanal",
+        value=kanal.mention,
+        inline=True,
+    )
+    embed.add_field(
+        name=f"{CUSTOM_EMOJI['grid']} Kategorija",
         value=kategorija.name if kategorija else "trenutna kategorija",
         inline=True,
     )
+    await interaction.response.defer(ephemeral=True, thinking=True)
     try:
-        await kanal.send(embed=embed, view=ReportPanelView())
+        _message, updated = await upsert_panel_message(
+            kanal,
+            interaction.guild.id,
+            "report",
+            "squad_report_open",
+            embed,
+            ReportPanelView(),
+        )
     except discord.Forbidden:
-        await interaction.response.send_message(
-            "Podešavanja su sačuvana, ali bot nema dozvolu da pošalje panel u taj kanal.",
-            ephemeral=True,
+        await interaction.edit_original_response(
+            content=(
+                "Podešavanja su sačuvana, ali ne mogu provjeriti ili ažurirati "
+                "Report panel. Botu su potrebne dozvole za čitanje historije i slanje poruka."
+            )
         )
         return
-    await interaction.response.send_message(
-        f"✅ Report panel je postavljen u {kanal.mention}.", ephemeral=True
+    except discord.HTTPException:
+        await interaction.edit_original_response(
+            content=(
+                "Discord nije potvrdio slanje/ažuriranje Report panela. "
+                "Nisam ponovio slanje da ne bih napravio duplikat."
+            )
+        )
+        return
+
+    status = "ažuriran" if updated else "postavljen"
+    await interaction.edit_original_response(
+        content=f"{CUSTOM_EMOJI['check']} Report panel je {status} u {kanal.mention}."
     )
 
 # ══════════════════════════════════════════════
@@ -5859,23 +6025,43 @@ class PomocView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, custom_id="pomoc_previous")
+    @discord.ui.button(
+        label="Prethodna",
+        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["move"]),
+        style=discord.ButtonStyle.secondary,
+        custom_id="pomoc_previous",
+    )
     async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current -= 1
         self._refresh_buttons()
         await interaction.response.edit_message(embed=self.pages[self.current], view=self)
 
-    @discord.ui.button(label="1/3", style=discord.ButtonStyle.primary, custom_id="pomoc_page")
+    @discord.ui.button(
+        label="1/3",
+        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["grid"]),
+        style=discord.ButtonStyle.primary,
+        custom_id="pomoc_page",
+    )
     async def page(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
 
-    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, custom_id="pomoc_next")
+    @discord.ui.button(
+        label="Sljedeća",
+        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["move"]),
+        style=discord.ButtonStyle.secondary,
+        custom_id="pomoc_next",
+    )
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current += 1
         self._refresh_buttons()
         await interaction.response.edit_message(embed=self.pages[self.current], view=self)
 
-    @discord.ui.button(label="✖", style=discord.ButtonStyle.danger, custom_id="pomoc_close")
+    @discord.ui.button(
+        label="Zatvori",
+        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["close"]),
+        style=discord.ButtonStyle.danger,
+        custom_id="pomoc_close",
+    )
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
         for child in self.children:
             child.disabled = True
@@ -5886,7 +6072,7 @@ async def send_pomoc_dm(ctx: commands.Context, embed: discord.Embed, view=None):
     try:
         await ctx.author.send(embed=embed, view=view)
         return True
-    except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+    except (discord.Forbidden, discord.NotFound):
         # Bot ne može zaobići korisnikove Discord privacy postavke. Umjesto
         # beskonačne opomene, pomoć ipak ostaje dostupna u kanalu.
         await ctx.send(
@@ -5895,6 +6081,11 @@ async def send_pomoc_dm(ctx: commands.Context, embed: discord.Embed, view=None):
             embed=embed,
             view=None,
         )
+        return False
+    except discord.HTTPException as exc:
+        # Ne šalji ponovo u kanal nakon nejasne mrežne greške: DM je možda
+        # već stigao, a ponavljanje bi napravilo drugu vidljivu kopiju.
+        print(f"[POMOC] DM slanje nije potvrđeno; bez ponovnog slanja: {exc}")
         return False
 
 @bot.command(name="pomoc")

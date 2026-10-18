@@ -166,7 +166,8 @@ Panel ima tri dugmeta:
 - `GWS & Events` — giveaway i event kanali
 - `Opis • sve komande` — privatan pregled svih registrovanih prefix i slash komandi
 
-Nakon ažuriranja ponovo pokreni `/info-postavi` da objaviš panel s novim dugmetom.
+Ponovno pokretanje `/info-postavi` ažurira postojeći panel u tom kanalu umjesto
+da objavi novu kopiju. Bot mora imati dozvole za čitanje historije poruka.
 Pregled podešavanja:
 
 ```text
@@ -193,6 +194,8 @@ Postavi Staff panel u trenutni ili izabrani kanal:
 
 Korisnik klikom na `Staff Apply` dobija privatni formular. Nakon slanja,
 prijava se šalje samo u podešeni staff kanal.
+Ponovno pokretanje `/staff-postavi` u istom kanalu ažurira postojeći panel,
+umjesto da napravi novu objavu.
 
 Podesi kategoriju za privatne tickete i staff ulogu:
 
@@ -210,6 +213,7 @@ Postavi Ticket panel:
 Klik na `Otvori Tiket` pravi privatni kanal za korisnika i staff. Jedan
 korisnik može imati samo jedan otvoren tiket, a tiket se zatvara dugmetom
 `Zatvori tiket`.
+Ponovno pokretanje `/ticket-postavi` u istom kanalu ažurira postojeći panel.
 
 Za slanje vlastitog teksta kao embed poruke koristi:
 
@@ -231,6 +235,7 @@ Report je odvojen od običnog ticketa i podešava se jednom komandom:
 
 Komanda odmah šalje panel sa dugmetom `Prijavi korisnika`. Klik otvara privatni
 kanal koji vide autor reporta i staff. Report se zatvara dugmetom `Zatvori report`.
+Ponovno pokretanje `/setreport` u istom kanalu ažurira postojeći panel.
 Komandu vidi bot-vlasnik i server administratori; ostali članovi ne mogu je koristiti.
 
 Svi embed-i koriste sivo-crnu dark boju (`#2B2D31`) i kompaktan prikaz bez `>` oznaka.
@@ -569,7 +574,7 @@ Provjereno:
 - nema stvarnih GIF fajlova ili GIF URL-ova u projektu
 - `/setreport`, `/setpomoc` i `/setlogin` vidljive su bot-vlasniku i server administratorima
 - pri pokretanju se ispisuje stvarni rezultat slash komandi sinhronizovanih sa Discordom
-- dugmad panelâ koriste sigurne Unicode ikone, kako nevažeći custom emoji ne bi blokirao slanje
+- interaktivna dugmad koriste Discord custom emoji-je, a panel komande ažuriraju postojeću objavu umjesto da je dupliraju
 - counting stanje se čuva trajno, a tačan unos se vraća kao reply embed
 - Kaladont mijenja dvije priložene slike naizmjenično; Info panel ima dugme za sve komande
 
@@ -585,8 +590,9 @@ Kaladont sada provjerava redoslijed igrača, pa isti član ne može odigrati dvi
 riječi zaredom, a unos mora postojati u B/H/S rječniku. Podaci se čuvaju
 atomarno kako prekid procesa ne bi oštetio postojeći profil.
 
-Welcome, Staff i Ticket paneli koriste fiksne Unicode ikone. Ikone se više
-ne mijenjaju prema redoslijedu emoji-ja u poruci niti nakon restarta bota.
+Welcome, Info, Staff, Ticket, Report, Giveaway i pomoć dugmad koriste
+Discord custom emoji-je. Ponovno postavljanje panela u istom kanalu ažurira
+postojeću botovu poruku; ranije objavljene duplikate bot ne briše automatski.
 
 ### Blockquote oznake
 
