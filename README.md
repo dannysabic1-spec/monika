@@ -102,11 +102,12 @@ Odaberi:
 - `music` — kanal na koji vodi dugme `play music`
 - `pozdrav` — kanal gdje se šalje poruka nakon klika na `Poželi dobrodošlicu`
 - `uloga` — automatska uloga za novog člana
+- `dm` — pokušaj slanja iste welcome poruke novom članu u privatnu poruku; uključeno podrazumijevano
 
 Primjer:
 
 ```text
-/welcome-podesi kanal:#welcome pravila:#pravila chat:#general music:#music pozdrav:#dobrodoslice uloga:@Member
+/welcome-podesi kanal:#welcome pravila:#pravila chat:#general music:#music pozdrav:#dobrodoslice uloga:@Member dm:true
 ```
 
 Zatim provjeri izgled:
@@ -115,10 +116,15 @@ Zatim provjeri izgled:
 /welcome-test
 ```
 
-`/welcome-podesi` odmah šalje test welcome embed u odabrani kanal. Prave welcome
-poruke šalju se pri ulasku novih članova; za to `Server Members Intent` mora biti
-uključen i u kodu i u Discord Developer Portalu. Test komanda prijavljuje dozvolu
-koja nedostaje ako bot ne može slati poruke ili embede.
+Welcome embed ima tri ravnomjerno poravnata inline polja za pravila, chat i muziku,
+thumbnail novog člana i custom emoji-je na dugmadima.
+`/welcome-podesi` odmah šalje test welcome embed u odabrani kanal. Pri ulasku novog
+člana bot šalje poruku u kanal i pokušava je poslati u DM ako je `dm` uključen.
+Discord može odbiti DM ako član ne prima privatne poruke od servera ili botova;
+i `/welcome-podesi dm:false` isključuje privatnu poruku. Bot tu postavku ne može
+zaobići. `Server Members Intent` mora biti uključen i u kodu
+i u Discord Developer Portalu. Test komanda prijavljuje dozvolu koja nedostaje ako
+bot ne može slati poruke ili embede.
 Welcome poruke, test i welcome status koriste sedam dostavljenih custom emoji-ja.
 Bot ih prvo traži među emoji-jima servera/aplikacije i koristi postojeće MONIKA
 emoji-je kao fallback ako neki od njih nije dostupan.
@@ -129,7 +135,7 @@ Pregled podešavanja:
 /welcome-status
 ```
 
-Isključivanje:
+Isključivanje welcome poruka u kanalu i DM-u:
 
 ```text
 /welcome-iskljuci

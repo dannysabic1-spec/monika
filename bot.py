@@ -6,6 +6,7 @@ import random
 import re
 import shutil
 import sys
+import uuid
 from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, timezone, timedelta
@@ -584,6 +585,8 @@ def get_welcome(data: dict, guild_id: int) -> dict:
             "music_channel_id": None,
             "pozdrav_channel_id": None,
             "role_id": None,
+            "enabled": False,
+            "dm_enabled": True,
         }
     cfg = data["welcome"][key]
     defaults = {
@@ -593,6 +596,8 @@ def get_welcome(data: dict, guild_id: int) -> dict:
         "music_channel_id": None,
         "pozdrav_channel_id": None,
         "role_id": None,
+        "enabled": bool(cfg.get("channel_id")),
+        "dm_enabled": True,
     }
     for k, v in defaults.items():
         if k not in cfg:
@@ -1098,10 +1103,15 @@ class WelcomeView(discord.ui.View):
         music_channel_id: int = None,
         guild_id: int = None,
         pozdrav_channel_id: int = None,
+        greeting_id: str = None,
     ):
         super().__init__(timeout=None)
         self.novi_clan_id = novi_clan_id
         self.pozdrav_channel_id = pozdrav_channel_id
+        self.guild_id = guild_id
+        self.greeting_id = greeting_id or (
+            f"{guild_id}:{novi_clan_id}:{uuid.uuid4().hex}"
+        )
 
         guild = bot.get_guild(guild_id) if guild_id else None
         greet_emoji = component_custom_emoji(welcome_emoji(guild, "love"))
@@ -1141,30 +1151,45 @@ class WelcomeView(discord.ui.View):
     ):
         if interaction.user.bot:
             await interaction.response.send_message(
-                "Botovi ne mogu slati dobrodošlice.", ephemeral=True
+                "Botovi ne mogu slati dobrodošlice.",
+                ephemeral=bool(interaction.guild),
             )
             return
 
         message_id = interaction.message.id
+        guild_id = self.guild_id or (
+            interaction.guild.id if interaction.guild else None
+        )
+        greeting_key = self.greeting_id
         async with WELCOME_GREETING_LOCK:
             data = load_data()
             saved_greetings = data.setdefault("welcome_greetings", {})
-            if message_id in WELCOME_GREETINGS or str(message_id) in saved_greetings:
+            if (
+                greeting_key in WELCOME_GREETINGS
+                or greeting_key in saved_greetings
+                or str(message_id) in saved_greetings
+            ):
                 await interaction.response.send_message(
                     f"{welcome_emoji(interaction.guild, 'love')} "
                     "Dobrodošlicu je već poslala druga osoba. "
                     "Ovo dugme može biti iskorišteno samo jednom.",
-                    ephemeral=True,
+                    ephemeral=bool(interaction.guild),
                 )
                 return
 
-            WELCOME_GREETINGS.add(message_id)
-            saved_greetings[str(message_id)] = {
+            WELCOME_GREETINGS.add(greeting_key)
+            saved_greetings[greeting_key] = {
+                "message_id": message_id,
                 "user_id": interaction.user.id,
-                "guild_id": interaction.guild.id if interaction.guild else None,
+                "guild_id": guild_id,
+                "member_id": self.novi_clan_id,
                 "timestamp": now_ts(),
             }
             save_data(data)
+            await interaction.response.defer(
+                ephemeral=bool(interaction.guild),
+                thinking=True,
+            )
 
             # Odmah ugasi dugme na originalnoj poruci.
             for child in self.children:
@@ -1172,43 +1197,71 @@ class WelcomeView(discord.ui.View):
                     child.disabled = True
             try:
                 await interaction.message.edit(view=self)
-            except discord.HTTPException:
-                pass
+            except discord.HTTPException as exc:
+                print(f"[WELCOME] Ne mogu ugasiti iskorišteno dugme: {exc}")
 
-        target = interaction.guild.get_member(self.novi_clan_id) if interaction.guild else None
-        target_mention = target.mention if target else f"<@{self.novi_clan_id}>"
-        guild_name = interaction.guild.name if interaction.guild else "server"
-
-        await interaction.response.send_message(
-            f"{CUSTOM_EMOJI['check']} Hvala! Tvoja dobrodošlica je uspješno poslana. "
-            "Dugme je sada iskorišteno i više niko ne može kliknuti na njega.",
-            ephemeral=True,
+        guild = interaction.guild or (
+            bot.get_guild(self.guild_id) if self.guild_id else None
         )
-        output_channel = interaction.channel
-        if interaction.guild and self.pozdrav_channel_id:
-            configured_channel = interaction.guild.get_channel(self.pozdrav_channel_id)
-            if configured_channel and hasattr(configured_channel, "send"):
-                output_channel = configured_channel
+        target = guild.get_member(self.novi_clan_id) if guild else None
+        target_mention = target.mention if target else f"<@{self.novi_clan_id}>"
+        guild_name = guild.name if guild else "server"
 
-        if output_channel:
-            love = welcome_emoji(interaction.guild, "love")
-            sparkles = welcome_emoji(interaction.guild, "sparkles")
-            sharks = welcome_emoji(interaction.guild, "sharks")
-            embed = discord.Embed(
-                title=f"{sparkles} Dobrodošlica je poslata!",
-                description=(
-                    f"> {love} {interaction.user.mention} je poslao/la "
-                    f"dobrodošlicu {target_mention} na **{guild_name}**!\n"
-                    f">\n"
-                    f"> {sharks} Prva osoba koja je kliknula dugme poželjela je dobrodošlicu "
-                    f"novom članu."
-                ),
-                color=_LP,
+        output_channel = None
+        if guild:
+            cfg = get_welcome(load_data(), guild.id)
+            for channel_id in (self.pozdrav_channel_id, cfg.get("channel_id")):
+                configured_channel = (
+                    guild.get_channel(channel_id) if channel_id else None
+                )
+                if configured_channel and hasattr(configured_channel, "send"):
+                    output_channel = configured_channel
+                    break
+        if output_channel is None and interaction.guild:
+            output_channel = interaction.channel
+
+        if output_channel is None:
+            await interaction.edit_original_response(
+                content=(
+                    f"{CUSTOM_EMOJI['check']} Hvala! Klik je zabilježen, "
+                    "ali welcome kanal nije dostupan za javnu objavu."
+                )
             )
-            embed.set_footer(
-                text=f"{BOT_NAME} {VERSION} • dobrodošlica"
-            )
+            return
+
+        love = welcome_emoji(guild, "love")
+        sparkles = welcome_emoji(guild, "sparkles")
+        sharks = welcome_emoji(guild, "sharks")
+        embed = discord.Embed(
+            title=f"{sparkles} Dobrodošlica je poslata!",
+            description=(
+                f"> {love} {interaction.user.mention} je poslao/la "
+                f"dobrodošlicu {target_mention} na **{guild_name}**!\n"
+                f">\n"
+                f"> {sharks} Prva osoba koja je kliknula dugme poželjela je dobrodošlicu "
+                "novom članu."
+            ),
+            color=_LP,
+        )
+        embed.set_footer(text=f"{BOT_NAME} {VERSION} • dobrodošlica")
+        try:
+            # Jedan pokušaj sprečava duplu objavu nakon nejasne HTTP greške.
             await output_channel.send(embed=embed)
+        except discord.HTTPException as exc:
+            print(f"[WELCOME] Javni pozdrav nije poslan nakon klika: {exc}")
+            await interaction.edit_original_response(
+                content=(
+                    f"{CUSTOM_EMOJI['close']} Klik je zabilježen, ali Discord "
+                    "nije prihvatio javnu objavu. Provjeri dozvole welcome kanala."
+                )
+            )
+            return
+        await interaction.edit_original_response(
+            content=(
+                f"{CUSTOM_EMOJI['check']} Hvala! Tvoja dobrodošlica je uspješno "
+                "poslana. Dugme je sada iskorišteno."
+            )
+        )
 
 def build_welcome_embed(member, guild: discord.Guild, cfg: dict, test: bool = False):
     """Kompaktna welcome poruka za nove članove, test i pregled podešavanja."""
@@ -1229,13 +1282,30 @@ def build_welcome_embed(member, guild: discord.Guild, cfg: dict, test: bool = Fa
         ),
         description=(
             f"{emoji('love')} {member.mention} — dobrodošao/la!\n"
-            f"{emoji('ghost')} {pravila}  ·  {emoji('sharks')} {chat}  ·  "
-            f"{emoji('mooncat')} {music}\n"
-            f"{emoji('fire')} Lijepo se smjesti!  "
+            f"{emoji('fire')} Lijepo se smjesti, upoznaj ekipu i uživaj!\n"
             f"{emoji('crayon')} Klikni ispod da poželiš dobrodošlicu."
         ),
         color=_LP,
     )
+    # Tri inline polja daju ravnomjeran raspored pravila, chata i muzike.
+    embed.add_field(
+        name=f"{emoji('ghost')} Pravila",
+        value=f"Pročitaj pravila u {pravila}.",
+        inline=True,
+    )
+    embed.add_field(
+        name=f"{emoji('sharks')} Chat",
+        value=f"Druži se sa članovima u {chat}.",
+        inline=True,
+    )
+    embed.add_field(
+        name=f"{emoji('mooncat')} Muzika",
+        value=f"Pronađi muziku u {music}.",
+        inline=True,
+    )
+    avatar = getattr(member, "display_avatar", None)
+    if avatar:
+        embed.set_thumbnail(url=avatar.url)
     return embed
 
 async def remember_welcome_message(
@@ -1244,13 +1314,16 @@ async def remember_welcome_message(
     music_channel_id: int,
     guild_id: int,
     pozdrav_channel_id: int,
+    greeting_id: str = None,
 ):
     """Sačuvaj i registruj personalizovano dugme da preživi restart."""
+    greeting_id = greeting_id or f"legacy:{message.id}"
     record = {
         "member_id": member_id,
         "music_channel_id": music_channel_id,
         "guild_id": guild_id,
         "pozdrav_channel_id": pozdrav_channel_id,
+        "greeting_id": greeting_id,
     }
     data = load_data()
     messages = data.setdefault("welcome_messages", {})
@@ -1261,7 +1334,13 @@ async def remember_welcome_message(
             messages.pop(old_id, None)
     save_data(data)
     bot.add_view(
-        WelcomeView(member_id, music_channel_id, guild_id, pozdrav_channel_id),
+        WelcomeView(
+            member_id,
+            music_channel_id,
+            guild_id,
+            pozdrav_channel_id,
+            greeting_id,
+        ),
         message_id=message.id,
     )
 
@@ -2505,6 +2584,7 @@ async def on_ready():
                         cfg.get("music_channel_id"),
                         int(cfg["guild_id"]),
                         cfg.get("pozdrav_channel_id"),
+                        cfg.get("greeting_id"),
                     ),
                     message_id=int(message_id),
                 )
@@ -2537,34 +2617,36 @@ async def on_ready():
 
 @bot.event
 async def on_member_join(member: discord.Member):
-    """Šalje welcome poruku u kanal koji je admin podesio."""
+    """Šalje welcome poruku u podešeni kanal i privatni inbox novog člana."""
     print(f"[WELCOME] Novi član {member.id} na serveru {member.guild.id}.")
     data = load_data()
     cfg = get_welcome(data, member.guild.id)
     channel_id = cfg.get("channel_id")
-    if not channel_id:
-        print(f"[WELCOME] Nema podešenog kanala za server {member.guild.id}.")
+    welcome_enabled = cfg.get("enabled", bool(channel_id))
+    if not welcome_enabled:
+        print(f"[WELCOME] Welcome sistem je isključen za server {member.guild.id}.")
         return
+    greeting_id = f"{member.guild.id}:{member.id}:{uuid.uuid4().hex}"
 
-    channel = member.guild.get_channel(channel_id)
-    if channel is None:
+    channel = member.guild.get_channel(channel_id) if channel_id else None
+    if channel is None and channel_id:
         try:
             channel = await bot.fetch_channel(channel_id)
         except discord.HTTPException as exc:
-            channel = None
             print(f"[WELCOME] Kanal {channel_id} nije dostupan: {exc}")
 
     if isinstance(channel, discord.TextChannel) and channel.guild.id == member.guild.id:
         try:
-            view = WelcomeView(
+            channel_view = WelcomeView(
                 member.id,
                 cfg.get("music_channel_id"),
                 member.guild.id,
                 cfg.get("pozdrav_channel_id"),
+                greeting_id,
             )
             welcome_message = await channel.send(
                 embed=build_welcome_embed(member, member.guild, cfg),
-                view=view,
+                view=channel_view,
                 allowed_mentions=discord.AllowedMentions(
                     users=[member],
                     roles=False,
@@ -2577,6 +2659,7 @@ async def on_member_join(member: discord.Member):
                 cfg.get("music_channel_id"),
                 member.guild.id,
                 cfg.get("pozdrav_channel_id"),
+                greeting_id,
             )
             print(f"[WELCOME] Poruka poslata u kanal {channel_id}.")
         except discord.Forbidden:
@@ -2586,11 +2669,50 @@ async def on_member_join(member: discord.Member):
             )
         except discord.HTTPException as exc:
             print(f"[WELCOME] Slanje u kanal {channel_id} nije uspjelo: {exc}")
-    else:
+    elif channel_id:
         print(
             f"[WELCOME] Kanal {channel_id} nije pronađen ili nije tekstualni "
             f"kanal servera {member.guild.id}."
         )
+    else:
+        print(f"[WELCOME] Nema podešenog welcome kanala za server {member.guild.id}.")
+
+    if cfg.get("dm_enabled", True):
+        try:
+            dm_view = WelcomeView(
+                member.id,
+                cfg.get("music_channel_id"),
+                member.guild.id,
+                cfg.get("pozdrav_channel_id"),
+                greeting_id,
+            )
+            dm_message = await member.send(
+                embed=build_welcome_embed(member, member.guild, cfg),
+                view=dm_view,
+                allowed_mentions=discord.AllowedMentions(
+                    users=[member],
+                    roles=False,
+                    everyone=False,
+                ),
+            )
+            await remember_welcome_message(
+                dm_message,
+                member.id,
+                cfg.get("music_channel_id"),
+                member.guild.id,
+                cfg.get("pozdrav_channel_id"),
+                greeting_id,
+            )
+            print(f"[WELCOME] Privatna poruka poslata članu {member.id}.")
+        except discord.Forbidden:
+            print(
+                f"[WELCOME] Discord je odbio DM članu {member.id}; "
+                "privatne poruke su vjerovatno zatvorene."
+            )
+        except discord.HTTPException as exc:
+            print(f"[WELCOME] Slanje privatne poruke članu {member.id} nije uspjelo: {exc}")
+    else:
+        print(f"[WELCOME] DM welcome je isključen za server {member.guild.id}.")
 
     role_id = cfg.get("role_id")
     if role_id:
@@ -2778,6 +2900,7 @@ async def ukloni_kanal(interaction: discord.Interaction, tip: str):
     music="Kanal za music dugme (opcionalno)",
     pozdrav="Kanal za poruke nakon klika na Poželi dobrodošlicu (opcionalno)",
     uloga="Uloga koja se automatski dodjeljuje novom članu (opcionalno)",
+    dm="Pokušaj poslati Welcome poruku novom članu u DM",
 )
 @app_commands.default_permissions(administrator=True)
 async def welcome_podesi(
@@ -2788,6 +2911,7 @@ async def welcome_podesi(
     music: discord.TextChannel = None,
     pozdrav: discord.TextChannel = None,
     uloga: discord.Role = None,
+    dm: bool = True,
 ):
     if interaction.guild is None:
         await interaction.response.send_message(
@@ -2811,6 +2935,8 @@ async def welcome_podesi(
 
     data = load_data()
     cfg = get_welcome(data, interaction.guild.id)
+    cfg["enabled"] = True
+    cfg["dm_enabled"] = dm
     cfg["channel_id"] = kanal.id
     cfg["pravila_channel_id"] = pravila.id if pravila else None
     cfg["chat_channel_id"] = chat.id if chat else None
@@ -2837,15 +2963,20 @@ async def welcome_podesi(
         f"> {e('mooncat')} **Music:** {music_txt}\n"
         f"> {e('crayon')} **Poruka dobrodošlice:** {pozdrav_txt}\n"
         f"> {e('fire')} **Automatska uloga:** {role_txt}\n"
+        f"> {e('mail')} **Welcome u DM:** {'uključen' if dm else 'isključen'}\n"
         f">\n"
-        f"> {e('sparkles')} ID-evi su sačuvani po serveru. Novi članovi će odmah dobijati welcome poruku."
+        f"> {e('sparkles')} Podešavanja su sačuvana za ovaj server."
     )
     await interaction.response.defer(ephemeral=True, thinking=True)
+    preview_greeting_id = (
+        f"preview:{interaction.guild.id}:{interaction.user.id}:{uuid.uuid4().hex}"
+    )
     welcome_view = WelcomeView(
         interaction.user.id,
         cfg.get("music_channel_id"),
         interaction.guild.id,
         cfg.get("pozdrav_channel_id"),
+        preview_greeting_id,
     )
     try:
         preview_message = await kanal.send(
@@ -2860,6 +2991,7 @@ async def welcome_podesi(
             cfg.get("music_channel_id"),
             interaction.guild.id,
             cfg.get("pozdrav_channel_id"),
+            preview_greeting_id,
         )
     except discord.Forbidden:
         await interaction.edit_original_response(
@@ -2877,7 +3009,8 @@ async def welcome_podesi(
     await interaction.edit_original_response(
         content=(
             f"✅ Welcome je podešen za {kanal.mention} i test poruka je poslata. "
-            "Stvarne welcome poruke stižu kada novi član uđe na server."
+            f"Pri ulasku novog člana bot će pokušati poslati welcome "
+            f"{'u server kanal i DM' if dm else 'u server kanal'}."
         )
     )
 
@@ -2901,6 +3034,10 @@ async def welcome_status(interaction: discord.Interaction):
     embed = discord.Embed(title=f"{e('sparkles')} Welcome status", color=_LP)
     embed.description = (
         f"> {e('love')} **Welcome kanal:** {mention(cfg.get('channel_id'))}\n"
+        f"> {e('sparkles')} **Automatski welcome:** "
+        f"{'uključen' if cfg.get('enabled', bool(cfg.get('channel_id'))) else 'isključen'}\n"
+        f"> {e('mail')} **Welcome u DM:** "
+        f"{'uključen' if cfg.get('dm_enabled', True) else 'isključen'}\n"
         f"> {e('ghost')} **Pravila:** {mention(cfg.get('pravila_channel_id'))}\n"
         f"> {e('sharks')} **Chat:** {mention(cfg.get('chat_channel_id'))}\n"
         f"> {e('mooncat')} **Music:** {mention(cfg.get('music_channel_id'))}\n"
@@ -2948,11 +3085,15 @@ async def welcome_test(interaction: discord.Interaction):
         return
 
     await interaction.response.defer(ephemeral=True, thinking=True)
+    preview_greeting_id = (
+        f"preview:{interaction.guild.id}:{interaction.user.id}:{uuid.uuid4().hex}"
+    )
     view = WelcomeView(
         interaction.user.id,
         cfg.get("music_channel_id"),
         interaction.guild.id,
         cfg.get("pozdrav_channel_id"),
+        preview_greeting_id,
     )
     try:
         preview_message = await channel.send(
@@ -2967,6 +3108,7 @@ async def welcome_test(interaction: discord.Interaction):
             cfg.get("music_channel_id"),
             interaction.guild.id,
             cfg.get("pozdrav_channel_id"),
+            preview_greeting_id,
         )
     except discord.Forbidden:
         await interaction.edit_original_response(
@@ -2992,9 +3134,12 @@ async def welcome_iskljuci(interaction: discord.Interaction):
     data = load_data()
     cfg = get_welcome(data, interaction.guild.id)
     cfg["channel_id"] = None
+    cfg["enabled"] = False
+    cfg["dm_enabled"] = False
     save_data(data)
     await interaction.response.send_message(
-        "✅ Automatske welcome poruke su isključene. Podešavanja ostalih kanala su sačuvana.",
+        "✅ Automatske welcome poruke u server kanalu i DM-u su isključene. "
+        "Podešavanja ostalih kanala su sačuvana.",
         ephemeral=True,
     )
 
