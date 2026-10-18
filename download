@@ -1,0 +1,6 @@
+.env
+__pycache__/
+*.py[cod]
+ljubav_data.json
+ljubav_data.json.bak
+ljubav_data.json.tmp

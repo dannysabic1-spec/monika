@@ -6,6 +6,7 @@ import random
 import re
 import shutil
 import sys
+import traceback
 import uuid
 from discord.ext import commands
 from discord import app_commands
@@ -423,6 +424,39 @@ def save_data(data: dict):
     except Exception as e:
         print(f"[ERROR] save_data: {e}")
 
+def disable_welcome_dm_for_existing_servers():
+    """Jednokratno isključi stare DM postavke koje su ranije bile podrazumijevane."""
+    data = load_data()
+    migration_key = "welcome_dm_off_migrated_v1"
+    if data.get(migration_key):
+        return
+
+    for cfg in data.get("welcome", {}).values():
+        if isinstance(cfg, dict):
+            cfg["dm_enabled"] = False
+
+    data[migration_key] = True
+    save_data(data)
+    print("[WELCOME] Welcome DM je isključen kao početna postavka.")
+
+def asset_path(filename: str) -> str:
+    """Nađi asset i kad je ime fajla dobilo jedinstveni sufiks pri uploadu."""
+    exact_path = os.path.join(DATA_DIR, filename)
+    if os.path.isfile(exact_path):
+        return exact_path
+
+    stem, extension = os.path.splitext(filename)
+    try:
+        matches = sorted(
+            name
+            for name in os.listdir(DATA_DIR)
+            if name.startswith(f"{stem}_")
+            and os.path.splitext(name)[1].lower() == extension.lower()
+        )
+    except OSError:
+        return exact_path
+    return os.path.join(DATA_DIR, matches[0]) if matches else exact_path
+
 def pomoc_allowed(data: dict, guild_id: int, user_id: int) -> bool:
     """Ograniči pomoć na 3 prikaza po članu u periodu od 60 minuta."""
     now = now_ts()
@@ -589,7 +623,7 @@ def get_welcome(data: dict, guild_id: int) -> dict:
             "pozdrav_channel_id": None,
             "role_id": None,
             "enabled": False,
-            "dm_enabled": True,
+            "dm_enabled": False,
         }
     cfg = data["welcome"][key]
     defaults = {
@@ -600,7 +634,7 @@ def get_welcome(data: dict, guild_id: int) -> dict:
         "pozdrav_channel_id": None,
         "role_id": None,
         "enabled": bool(cfg.get("channel_id")),
-        "dm_enabled": True,
+        "dm_enabled": False,
     }
     for k, v in defaults.items():
         if k not in cfg:
@@ -1211,6 +1245,17 @@ async def _tree_interaction_check(interaction: discord.Interaction) -> bool:
     now = asyncio.get_running_loop().time()
     previous = PROCESSED_SLASH_INTERACTIONS.get(interaction.id)
     if previous is not None and now - previous < SLASH_INTERACTION_DEDUP_SECONDS:
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.send_message(
+                    "Ovaj zahtjev je već primljen. Sačekaj odgovor prije ponovnog pokušaja.",
+                    ephemeral=True,
+                )
+            except discord.HTTPException as exc:
+                print(
+                    f"[SLASH] Duplirani zahtjev {interaction.id} nije mogao biti "
+                    f"potvrđen: HTTP {exc.status}, Discord kod {exc.code}."
+                )
         return False
 
     PROCESSED_SLASH_INTERACTIONS[interaction.id] = now
@@ -1234,6 +1279,45 @@ async def _tree_interaction_check(interaction: discord.Interaction) -> bool:
     return True
 
 bot.tree.interaction_check = _tree_interaction_check
+
+@bot.tree.error
+async def on_app_command_error(
+    interaction: discord.Interaction,
+    error: app_commands.AppCommandError,
+):
+    """Prikaži privatnu poruku umjesto da slash komanda ostane bez odgovora."""
+    command_name = interaction.command.name if interaction.command else "nepoznata"
+    original = getattr(error, "original", error)
+
+    if isinstance(error, app_commands.CommandOnCooldown):
+        user_message = (
+            f"Komanda je trenutno na cooldownu. Pokušaj ponovo za "
+            f"{error.retry_after:.1f} sekundi."
+        )
+    elif isinstance(error, app_commands.CheckFailure):
+        user_message = "Nemaš potrebnu dozvolu ili uslov za ovu komandu."
+    elif isinstance(original, discord.Forbidden):
+        user_message = "Bot nema potrebnu Discord dozvolu za ovu radnju."
+    elif isinstance(original, discord.HTTPException):
+        user_message = "Discord nije prihvatio ovu radnju. Provjeri dozvole i pokušaj ponovo."
+    else:
+        user_message = (
+            "Komanda nije završena zbog interne greške. Greška je zabilježena "
+            "u konzoli bota."
+        )
+        print(f"[SLASH ERROR] Komanda /{command_name} nije uspjela:")
+        traceback.print_exception(type(error), error, error.__traceback__)
+
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(user_message, ephemeral=True)
+        else:
+            await interaction.response.send_message(user_message, ephemeral=True)
+    except discord.HTTPException as response_error:
+        print(
+            f"[SLASH ERROR] Ne mogu poslati privatnu grešku za /{command_name}: "
+            f"HTTP {response_error.status}, Discord kod {response_error.code}."
+        )
 
 async def _is_bot_owner_or_admin(interaction: discord.Interaction) -> bool:
     """Dozvoli upravljanje vlasniku bota ili server administratoru."""
@@ -2724,11 +2808,25 @@ async def on_ready():
     global PERSISTENT_VIEWS_REGISTERED, MONIKA_GUESS_TASK
     global VOICE_ACTIVITY_TASK, VOICE_ACTIVITY_RECONCILED
     await load_application_emojis()
-    synced_commands = await bot.tree.sync()
-    print(
-        f"[{BOT_NAME}] Registrovano slash komandi: {len(synced_commands)} "
-        f"({', '.join(command.name for command in synced_commands)})"
-    )
+    disable_welcome_dm_for_existing_servers()
+    if bot.user:
+        try:
+            # Učitaj vlasnika aplikacije prije prve admin/owner komande,
+            # da provjera vlasništva ne potroši rok za odgovor interakcije.
+            await bot.is_owner(bot.user)
+        except discord.HTTPException as exc:
+            print(f"[OWNER] Ne mogu unaprijed učitati vlasnika aplikacije: {exc}")
+    try:
+        synced_commands = await bot.tree.sync()
+        print(
+            f"[{BOT_NAME}] Registrovano slash komandi: {len(synced_commands)} "
+            f"({', '.join(command.name for command in synced_commands)})"
+        )
+    except Exception as exc:
+        print(
+            f"[SLASH SYNC ERROR] Slash komande nisu sinhronizovane: "
+            f"{type(exc).__name__}: {exc}"
+        )
     if not PERSISTENT_VIEWS_REGISTERED:
         bot.add_view(InfoView())
         bot.add_view(StaffPanelView())
@@ -2855,7 +2953,7 @@ async def on_member_join(member: discord.Member):
     else:
         print(f"[WELCOME] Nema podešenog welcome kanala za server {member.guild.id}.")
 
-    if cfg.get("dm_enabled", True):
+    if cfg.get("dm_enabled", False):
         try:
             dm_view = WelcomeView(
                 member.id,
@@ -3051,16 +3149,16 @@ async def setlogin(interaction: discord.Interaction, kanal: discord.TextChannel)
     if not interaction.guild:
         await interaction.response.send_message("Ova komanda radi samo na serveru.", ephemeral=True)
         return
+    await interaction.response.defer(ephemeral=True, thinking=True)
     if not await _is_bot_owner_or_admin(interaction):
-        await interaction.response.send_message(
-            "Samo vlasnik bota ili administrator servera može podesiti ovaj kanal.",
-            ephemeral=True,
+        await interaction.edit_original_response(
+            content="Samo vlasnik bota ili administrator servera može podesiti ovaj kanal.",
         )
         return
     data = load_data()
     get_kanali(data, interaction.guild.id)["member_log"] = kanal.id
     save_data(data)
-    await interaction.response.send_message(embed=discord.Embed(
+    await interaction.edit_original_response(embed=discord.Embed(
         title=f"{CUSTOM_EMOJI['settings']} Kanal evidencije podešen",
         description=(
             f"{CUSTOM_EMOJI['check']} Dolasci, banovi i unbanovi "
@@ -3068,7 +3166,7 @@ async def setlogin(interaction: discord.Interaction, kanal: discord.TextChannel)
             f"{CUSTOM_EMOJI['check']} Komande više nisu ograničene na jedan kanal."
         ),
         color=_LP,
-    ), ephemeral=True)
+    ))
 
 @bot.tree.command(name="evidencija", description="Prikaži broj poruka i voice vrijeme člana")
 @app_commands.describe(clan="Član čiju evidenciju želiš vidjeti (podrazumijevano: ti)")
@@ -3192,17 +3290,17 @@ async def ban_member(
         )
         return
     safe_reason = (razlog or "Nije naveden").strip()[:450]
+    await interaction.response.defer(ephemeral=True, thinking=True)
     try:
         await clan.ban(reason=safe_reason)
     except discord.Forbidden:
-        await interaction.response.send_message(
-            f"{CUSTOM_EMOJI['close']} Discord je odbio ban. Provjeri dozvole i redoslijed uloga.",
-            ephemeral=True,
+        await interaction.edit_original_response(
+            content=f"{CUSTOM_EMOJI['close']} Discord je odbio ban. Provjeri dozvole i redoslijed uloga."
         )
         return
     except discord.HTTPException as exc:
-        await interaction.response.send_message(
-            f"{CUSTOM_EMOJI['close']} Ban nije uspio: {exc}", ephemeral=True
+        await interaction.edit_original_response(
+            content=f"{CUSTOM_EMOJI['close']} Ban nije uspio: {exc}"
         )
         return
     embed = discord.Embed(
@@ -3214,8 +3312,8 @@ async def ban_member(
         ),
         color=_LP,
     )
-    await interaction.response.send_message(
-        embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none()
+    await interaction.edit_original_response(
+        embed=embed, allowed_mentions=discord.AllowedMentions.none()
     )
 
 @bot.tree.command(name="unban", description="Ukloni ban pomoću Discord korisničkog ID-a")
@@ -3244,26 +3342,25 @@ async def unban_member(
         return
     user_id = int(clan_id)
     safe_reason = (razlog or "Nije naveden").strip()[:450]
+    await interaction.response.defer(ephemeral=True, thinking=True)
     try:
         await guild.unban(
             discord.Object(id=user_id),
             reason=safe_reason,
         )
     except discord.NotFound:
-        await interaction.response.send_message(
-            f"{CUSTOM_EMOJI['close']} Taj ID nije pronađen na listi banovanih članova.",
-            ephemeral=True,
+        await interaction.edit_original_response(
+            content=f"{CUSTOM_EMOJI['close']} Taj ID nije pronađen na listi banovanih članova."
         )
         return
     except discord.Forbidden:
-        await interaction.response.send_message(
-            f"{CUSTOM_EMOJI['close']} Bot nema dozvolu Ban Members.",
-            ephemeral=True,
+        await interaction.edit_original_response(
+            content=f"{CUSTOM_EMOJI['close']} Bot nema dozvolu Ban Members."
         )
         return
     except discord.HTTPException as exc:
-        await interaction.response.send_message(
-            f"{CUSTOM_EMOJI['close']} Unban nije uspio: {exc}", ephemeral=True
+        await interaction.edit_original_response(
+            content=f"{CUSTOM_EMOJI['close']} Unban nije uspio: {exc}"
         )
         return
     embed = discord.Embed(
@@ -3275,8 +3372,8 @@ async def unban_member(
         ),
         color=_LP,
     )
-    await interaction.response.send_message(
-        embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none()
+    await interaction.edit_original_response(
+        embed=embed, allowed_mentions=discord.AllowedMentions.none()
     )
 
 @bot.tree.command(name="setpomoc", description="Vlasnik/admin: postavi kanal za .pomoc")
@@ -3285,20 +3382,20 @@ async def setpomoc(interaction: discord.Interaction, kanal: discord.TextChannel)
     if not interaction.guild:
         await interaction.response.send_message("Ova komanda radi samo na serveru.", ephemeral=True)
         return
+    await interaction.response.defer(ephemeral=True, thinking=True)
     if not await _is_bot_owner_or_admin(interaction):
-        await interaction.response.send_message(
-            "Samo vlasnik bota ili administrator servera može podesiti ovaj kanal.",
-            ephemeral=True,
+        await interaction.edit_original_response(
+            content="Samo vlasnik bota ili administrator servera može podesiti ovaj kanal.",
         )
         return
     data = load_data()
     get_kanali(data, interaction.guild.id)["pomoc"] = kanal.id
     save_data(data)
-    await interaction.response.send_message(embed=discord.Embed(
+    await interaction.edit_original_response(embed=discord.Embed(
         title="Kanal za pomoć podešen",
         description=f"> `.pomoc` je sada dostupna samo u {kanal.mention}.",
         color=_LP,
-    ), ephemeral=True)
+    ))
 
 @bot.command(name="setpomoc")
 async def setpomoc_prefix(ctx: commands.Context, kanal: discord.TextChannel = None):
@@ -3373,7 +3470,7 @@ async def welcome_podesi(
     music: discord.TextChannel = None,
     pozdrav: discord.TextChannel = None,
     uloga: discord.Role = None,
-    dm: bool = True,
+    dm: bool = False,
 ):
     if interaction.guild is None:
         await interaction.response.send_message(
@@ -3395,6 +3492,7 @@ async def welcome_podesi(
         )
         return
 
+    await interaction.response.defer(ephemeral=True, thinking=True)
     data = load_data()
     cfg = get_welcome(data, interaction.guild.id)
     cfg["enabled"] = True
@@ -3429,7 +3527,6 @@ async def welcome_podesi(
         f">\n"
         f"> {e('sparkles')} Podešavanja su sačuvana za ovaj server."
     )
-    await interaction.response.defer(ephemeral=True, thinking=True)
     preview_greeting_id = (
         f"preview:{interaction.guild.id}:{interaction.user.id}:{uuid.uuid4().hex}"
     )
@@ -3499,7 +3596,7 @@ async def welcome_status(interaction: discord.Interaction):
         f"> {e('sparkles')} **Automatski welcome:** "
         f"{'uključen' if cfg.get('enabled', bool(cfg.get('channel_id'))) else 'isključen'}\n"
         f"> {e('mail')} **Welcome u DM:** "
-        f"{'uključen' if cfg.get('dm_enabled', True) else 'isključen'}\n"
+        f"{'uključen' if cfg.get('dm_enabled', False) else 'isključen'}\n"
         f"> {e('ghost')} **Pravila:** {mention(cfg.get('pravila_channel_id'))}\n"
         f"> {e('sharks')} **Chat:** {mention(cfg.get('chat_channel_id'))}\n"
         f"> {e('mooncat')} **Music:** {mention(cfg.get('music_channel_id'))}\n"
@@ -3516,6 +3613,7 @@ async def welcome_test(interaction: discord.Interaction):
             "Ova komanda se koristi samo na serveru.", ephemeral=True
         )
         return
+    await interaction.response.defer(ephemeral=True, thinking=True)
 
     data = load_data()
     cfg = get_welcome(data, interaction.guild.id)
@@ -3527,26 +3625,23 @@ async def welcome_test(interaction: discord.Interaction):
         except discord.HTTPException:
             channel = None
     if not isinstance(channel, discord.TextChannel) or channel.guild.id != interaction.guild.id:
-        await interaction.response.send_message(
-            "Welcome kanal nije podešen ili više ne postoji. Pokreni `/welcome-podesi`.",
-            ephemeral=True,
+        await interaction.edit_original_response(
+            content="Welcome kanal nije podešen ili više ne postoji. Pokreni `/welcome-podesi`."
         )
         return
     bot_member = interaction.guild.me
     if not bot_member:
-        await interaction.response.send_message(
-            "Ne mogu provjeriti dozvole bota na serveru.", ephemeral=True
+        await interaction.edit_original_response(
+            content="Ne mogu provjeriti dozvole bota na serveru."
         )
         return
     permissions = channel.permissions_for(bot_member)
     if not permissions.send_messages or not permissions.embed_links:
-        await interaction.response.send_message(
-            f"Bot nema Send Messages i/ili Embed Links dozvolu u {channel.mention}.",
-            ephemeral=True,
+        await interaction.edit_original_response(
+            content=f"Bot nema Send Messages i/ili Embed Links dozvolu u {channel.mention}."
         )
         return
 
-    await interaction.response.defer(ephemeral=True, thinking=True)
     preview_greeting_id = (
         f"preview:{interaction.guild.id}:{interaction.user.id}:{uuid.uuid4().hex}"
     )
@@ -3970,26 +4065,25 @@ async def posalji_embed(
         description=tekst,
         color=_LP,
     )
+    await interaction.response.defer(ephemeral=True, thinking=True)
     try:
         await target.send(
             embed=embed,
             allowed_mentions=discord.AllowedMentions.none(),
         )
     except discord.Forbidden:
-        await interaction.response.send_message(
-            "Ne mogu poslati embed u taj kanal. Provjeri dozvole bota.",
-            ephemeral=True,
+        await interaction.edit_original_response(
+            content="Ne mogu poslati embed u taj kanal. Provjeri dozvole bota."
         )
         return
     except discord.HTTPException:
-        await interaction.response.send_message(
-            "Discord nije prihvatio embed. Provjeri dužinu teksta i probaj ponovo.",
-            ephemeral=True,
+        await interaction.edit_original_response(
+            content="Discord nije prihvatio embed. Provjeri dužinu teksta i probaj ponovo."
         )
         return
 
-    await interaction.response.send_message(
-        f"✅ Embed je poslat u {target.mention}.", ephemeral=True
+    await interaction.edit_original_response(
+        content=f"✅ Embed je poslat u {target.mention}."
     )
 
 @bot.tree.command(name="setreport", description="Vlasnik/admin: podesi privatni report panel")
@@ -4007,10 +4101,10 @@ async def setreport(
     if not interaction.guild:
         await interaction.response.send_message("Ova komanda radi samo na serveru.", ephemeral=True)
         return
+    await interaction.response.defer(ephemeral=True, thinking=True)
     if not await _is_bot_owner_or_admin(interaction):
-        await interaction.response.send_message(
-            "Samo vlasnik bota ili administrator servera može podesiti report sistem.",
-            ephemeral=True,
+        await interaction.edit_original_response(
+            content="Samo vlasnik bota ili administrator servera može podesiti report sistem."
         )
         return
     data = load_data()
@@ -4038,7 +4132,6 @@ async def setreport(
         value=kategorija.name if kategorija else "trenutna kategorija",
         inline=True,
     )
-    await interaction.response.defer(ephemeral=True, thinking=True)
     try:
         _message, updated = await upsert_panel_message(
             kanal,
@@ -6915,7 +7008,7 @@ async def send_game_embed(
     channel_key = f"{ctx.guild.id if ctx.guild else 0}:{ctx.channel.id}:{game}"
     image_index = GAME_STICKER_ROTATION.get(channel_key, 0)
     filename = filenames[image_index % len(filenames)] if filenames else None
-    image_path = os.path.join(DATA_DIR, filename) if filename else None
+    image_path = asset_path(filename) if filename else None
 
     if image_path and os.path.isfile(image_path):
         embed.set_thumbnail(url=f"attachment://{filename}")
@@ -7402,8 +7495,19 @@ async def poruka(
     limit: int = 100,
 ):
     """Vlasnik bota ili servera šalje najviše 100 pozivnica u DM."""
+    async def reply(content: str, **kwargs):
+        if ctx.interaction is not None:
+            # Slash verzija već je odgođena privatno. Uredi tu potvrdu umjesto
+            # da pravi dodatnu javnu poruku ili ostavi indikator učitavanja.
+            kwargs.pop("delete_after", None)
+            return await ctx.interaction.edit_original_response(
+                content=content,
+                embed=kwargs.get("embed"),
+            )
+        return await ctx.send(content, **kwargs)
+
     if ctx.guild is None:
-        await ctx.send("Komandu `.poruka` pokreni u kanalu servera.", delete_after=8)
+        await reply("Komandu `.poruka` pokreni u kanalu servera.", delete_after=8)
         return
 
     try:
@@ -7413,21 +7517,22 @@ async def poruka(
         print(f"[PORUKA] Provjera vlasnika bota nije uspjela: {exc}")
     is_guild_owner = ctx.author.id == ctx.guild.owner_id
     if not (is_bot_owner or is_guild_owner):
-        await ctx.send(
+        await reply(
             "Ovu komandu može koristiti vlasnik bota ili vlasnik ovog servera.",
             delete_after=12,
         )
         return
 
     if not server_link:
-        await ctx.send(
-            "Upotreba: `.poruka <link-servera> [broj 1-100]`\n"
+        await reply(
+            "Upotreba: `.poruka <link-servera> [broj 1-100]` ili "
+            "`/poruka server_link:<link> limit:<broj>`.\n"
             "Primjer: `.poruka https://discord.gg/tvoj-link 100`",
             delete_after=12,
         )
         return
     if not 1 <= limit <= 100:
-        await ctx.send(
+        await reply(
             "Broj mora biti između **1 i 100**. Discord može odbiti DM "
             "članovima koji ne dozvoljavaju privatne poruke.",
             delete_after=12,
@@ -7445,7 +7550,7 @@ async def poruka(
         server_link,
         re.IGNORECASE,
     ):
-        await ctx.send(
+        await reply(
             "Link mora biti Discord invite link, npr. "
             "`https://discord.gg/tvoj-link`.",
             delete_after=12,
@@ -7527,7 +7632,7 @@ async def poruka(
         embed.set_thumbnail(url=ctx.guild.icon.url)
     embed.set_footer(text=f"{BOT_NAME} {VERSION} • pozivnica")
 
-    status_message = await ctx.send(
+    status_message = await reply(
         f"Počinjem slati pozivnicu u DM za najviše **{limit} članova** "
         f"servera **{ctx.guild.name}**..."
     )
@@ -7588,13 +7693,31 @@ async def poruka(
             final_text += " Učitavanje članova je prekinuto; dio članova možda nije obrađen."
     await status_message.edit(content=final_text)
 
+@bot.tree.command(
+    name="poruka",
+    description="Vlasnik šalje pozivnicu u DM do 100 članova servera",
+)
+@app_commands.describe(
+    server_link="Discord invite link servera",
+    limit="Maksimalan broj članova (1–100, podrazumijevano 100)",
+)
+async def poruka_slash(
+    interaction: discord.Interaction,
+    server_link: str,
+    limit: app_commands.Range[int, 1, 100] = 100,
+):
+    """Slash ulaz za postojeću, vlasniku ograničenu .poruka funkciju."""
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    ctx = await commands.Context.from_interaction(interaction)
+    await poruka.callback(ctx, server_link=server_link, limit=limit)
+
 @bot.tree.command(name="opis", description="[OWNER] Objavi kompletno uputstvo za korištenje bota")
 async def opis_slash(interaction: discord.Interaction):
     """Objavljuje kompletno, višedijelno uputstvo samo kada ga pozove vlasnik bota."""
+    await interaction.response.defer(ephemeral=True, thinking=True)
     if not await bot.is_owner(interaction.user):
-        await interaction.response.send_message(
-            "Ovu komandu može koristiti samo vlasnik bota.",
-            ephemeral=True,
+        await interaction.edit_original_response(
+            content="Ovu komandu može koristiti samo vlasnik bota."
         )
         return
 
@@ -7766,16 +7889,26 @@ async def opis_slash(interaction: discord.Interaction):
     elif bot.user and bot.user.display_avatar:
         slika_url = bot.user.display_avatar.url
 
+    target_channel = interaction.channel
+    if target_channel is None or not callable(getattr(target_channel, "send", None)):
+        await interaction.edit_original_response(
+            content="Ne mogu objaviti uputstvo u ovom kanalu."
+        )
+        return
+
     for index, embed in enumerate(embeds, start=1):
         if slika_url:
             embed.set_thumbnail(url=slika_url)
         embed.set_footer(
             text=f"{BOT_NAME} {VERSION} • dio {index}/{len(embeds)} • članske komande"
         )
-        if index == 1:
-            await interaction.response.send_message(embed=embed)
-        else:
-            await interaction.followup.send(embed=embed)
+        await target_channel.send(
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    await interaction.edit_original_response(
+        content="✅ Uputstvo je objavljeno."
+    )
 
 @bot.tree.command(name="komande", description="Pregled svih prefix komandi i mini-igara")
 async def komande_slash(interaction: discord.Interaction):
@@ -7804,7 +7937,7 @@ async def komande_slash(interaction: discord.Interaction):
 @bot.tree.command(name="igre", description="Pregled mini-igara")
 async def igre_slash(interaction: discord.Interaction):
     filename = "game_sticker_counting.png"
-    image_path = os.path.join(DATA_DIR, filename)
+    image_path = asset_path(filename)
     e = game_embed(
         "🎮 Mini-igre",
         [

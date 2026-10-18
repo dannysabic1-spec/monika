@@ -4,10 +4,20 @@ Ovo je kompletan Discord bot sa ljubavnim sistemom, virtuelnom ekonomijom,
 kućama za parove, ribolovom, rang-listama, welcome panelom i Info/GWS & Events
 panelom.
 
-Na Replitu se bot pokreće workflow-om `MONIKA Discord Bot`. Potreban je Replit
-Secret `DISCORD_TOKEN`; komandu za podešavanje upisuj kao slash komandu sa `/`,
-ne sa prefixom `.`. Potvrde za podešavanje su privatne, a komande `-postavi`
-objavljuju panel u kanalu.
+## Brzi početak na Replitu
+
+1. Otpakuj sadržaj ZIP-a u glavni folder projekta; `bot.py`, `main.py`,
+   `requirements.txt` i stikeri treba da budu zajedno.
+2. U Replit Secrets dodaj tajnu pod imenom `DISCORD_TOKEN`. Ne upisuj token u
+   fajl i ne šalji ga u chat.
+3. Instaliraj zavisnosti komandom `python -m pip install -r requirements.txt`.
+4. Pokreni projekat sa `python main.py` (ili postavi tu komandu kao Run/Workflow).
+   `main.py` pokreće `bot.py`.
+5. U konzoli provjeri da piše `Registrovano slash komandi: 27`.
+
+Prilikom prvog pokretanja stara welcome DM podešavanja prelaze na isključeno.
+Komande za podešavanje koriste slash `/`, a obične članske komande prefix `.`.
+Priloženi snimak greške je sačuvan kao `reference/discord-error.png`; bot ga ne koristi.
 
 ## 1. Instalacija
 
@@ -104,12 +114,12 @@ Odaberi:
 - `music` — kanal na koji vodi dugme `play music`
 - `pozdrav` — kanal gdje se šalje poruka nakon klika na `Poželi dobrodošlicu`
 - `uloga` — automatska uloga za novog člana
-- `dm` — pokušaj slanja iste welcome poruke novom članu u privatnu poruku; uključeno podrazumijevano
+- `dm` — pokušaj slanja iste welcome poruke novom članu u privatnu poruku; isključeno podrazumijevano
 
 Primjer:
 
 ```text
-/welcome-podesi kanal:#welcome pravila:#pravila chat:#general music:#music pozdrav:#dobrodoslice uloga:@Member dm:true
+/welcome-podesi kanal:#welcome pravila:#pravila chat:#general music:#music pozdrav:#dobrodoslice uloga:@Member dm:false
 ```
 
 Zatim provjeri izgled:
@@ -122,6 +132,9 @@ Welcome embed ima tri ravnomjerno poravnata inline polja za pravila, chat i muzi
 thumbnail novog člana i custom emoji-je na dugmadima.
 `/welcome-podesi` odmah šalje test welcome embed u odabrani kanal. Pri ulasku novog
 člana bot šalje poruku u kanal i pokušava je poslati u DM ako je `dm` uključen.
+Welcome DM je podrazumijevano isključen. Stare sačuvane DM postavke biće jednom
+prebačene na isključeno pri prvom pokretanju ove verzije; DM se može uključiti
+kasnije eksplicitno sa `dm:true`.
 Discord može odbiti DM ako član ne prima privatne poruke od servera ili botova;
 i `/welcome-podesi dm:false` isključuje privatnu poruku. Bot tu postavku ne može
 zaobići. `Server Members Intent` mora biti uključen i u kodu
@@ -272,6 +285,7 @@ Svi embed-i koriste sivo-crnu dark boju (`#2B2D31`) i kompaktan prikaz bez `>` o
 /ticket-postavi
 /embed
 /setreport
+/poruka
 /setmonika
 /iskljuci-moniku
 /opis
@@ -390,11 +404,17 @@ Vlasnik bota ili servera može poslati pozivnicu u privatne poruke najviše
 .poruka https://discord.gg/tvoj-link 100
 ```
 
-Komandu može koristiti vlasnik bota ili vlasnik servera. Poruka sadrži pozivni
+Ista funkcija radi i kao slash komanda:
+
+```text
+/poruka server_link:https://discord.gg/tvoj-link limit:100
+```
+
+Prefix i slash komandu mogu koristiti vlasnik bota ili vlasnik servera. Poruka sadrži pozivni
 link i pregled glavnih komandi. Broj je opcionalan (podrazumijevano 100; raspon
 1–100). Botovi se preskaču. Završni izvještaj razdvaja poslato, Discord odbijene
 DM-ove i druge HTTP greške. Bot ne može zaobići članske postavke privatnosti.
-`.poruka` nije ograničena na evidencijski kanal `/setlogin`.
+`.poruka` i `/poruka` nisu ograničene na evidencijski kanal `/setlogin`.
 
 ### Ljubav i veze
 
@@ -594,7 +614,7 @@ kopiju.
 Provjereno:
 
 - 79 prefix komandi
-- 26 slash komandi registrovanih u kodu
+- 27 slash komandi registrovanih u kodu
 - nema dupliranih naziva komandi
 - Python sintaksa prolazi bez greške
 - nema hardkodovanog Discord tokena
