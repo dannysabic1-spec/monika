@@ -1102,16 +1102,6 @@ PREFIX_COMMAND_CHANNEL_TYPES = {
     "kaladont": "kaladont",
 }
 
-@bot.check
-async def enforce_configured_prefix_command_channel(ctx: commands.Context) -> bool:
-    """Ograniči članske prefix komande na njihove podešene kategorijske kanale."""
-    if not ctx.guild or not ctx.command:
-        return True
-    channel_type = PREFIX_COMMAND_CHANNEL_TYPES.get(ctx.command.name)
-    if not channel_type:
-        return True
-    return await check_kanal(ctx, channel_type)
-
 async def check_pomoc_channel(ctx: commands.Context) -> bool:
     """Pomoć je dostupna samo u kanalu koji je postavio administrator."""
     if not ctx.guild:
@@ -1335,6 +1325,16 @@ intents.reactions       = True
 intents.voice_states    = True
 
 bot = commands.Bot(command_prefix=BOT_PREFIX, intents=intents, help_command=None)
+
+@bot.check
+async def enforce_configured_prefix_command_channel(ctx: commands.Context) -> bool:
+    """Ograniči članske prefix komande na njihove podešene kategorijske kanale."""
+    if not ctx.guild or not ctx.command:
+        return True
+    channel_type = PREFIX_COMMAND_CHANNEL_TYPES.get(ctx.command.name)
+    if not channel_type:
+        return True
+    return await check_kanal(ctx, channel_type)
 
 # Zaštiti slash komande od ponovne obrade istog Discord interaction ID-a.
 PROCESSED_SLASH_INTERACTIONS = {}
