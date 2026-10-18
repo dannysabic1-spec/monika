@@ -1,4 +1,4 @@
-# MONIKA BOT Discord Bot — v4.4
+# MONIKA BOT Discord Bot — v4.5
 
 Ovo je kompletan Discord bot sa ljubavnim sistemom, virtuelnom ekonomijom,
 kućama za parove, ribolovom, rang-listama, welcome panelom i Info/GWS & Events
@@ -74,6 +74,8 @@ Botu na serveru daj najmanje ove dozvole:
 - Read Message History
 - Add Reactions
 - Manage Channels (za kreiranje i zatvaranje privatnih ticket/report kanala)
+- Ban Members (za `/ban` i `/unban`)
+- View Audit Log (opcionalno, prikazuje moderatora u ban/unban evidenciji)
 
 Za automatsku ulogu novim članovima dodatno treba:
 
@@ -252,6 +254,10 @@ Svi embed-i koriste sivo-crnu dark boju (`#2B2D31`) i kompaktan prikaz bez `>` o
 /setkanal
 /ukloni-kanal
 /setlogin
+/evidencija
+/topaktivnost
+/ban
+/unban
 /setpomoc
 /welcome-podesi
 /welcome-status
@@ -282,11 +288,26 @@ Za ograničavanje komandi i mini-igara na određene kanale koristi:
 /setkanal casino #casino
 ```
 
-Za zaključavanje svih prefix i slash komandi na jedan kanal koristi:
+`/setlogin` više ne zaključava komande. Postavi kanal za evidencijske embedove
+dolasaka članova i ban/unban događaja. Nakon ažuriranja pokreni `/setlogin`
+ponovo da odabereš kanal evidencije:
 
 ```text
-/setlogin kanal:#komande
+/setlogin kanal:#evidencija
 ```
+
+Statistika počinje brojati poruke nakon pokretanja ove verzije. `/evidencija`
+prikaže statistiku tebe ili odabranog člana, uključujući poruke po tekstualnom
+kanalu i voice vrijeme po voice kanalu. Ista evidencija dostupna je i kao
+prefix komanda `.evidencija [@član]`. `/topaktivnost` prikazuje prvih 10 članova
+po broju poruka ili voice vremenu. Brojači i voice podaci čuvaju se u
+`ljubav_data.json`; bot ne broji voice vrijeme dok je ugašen.
+
+Za moderaciju koristi `/ban clan razlog` i `/unban clan_id razlog`. Komande
+šalju privatnu potvrdu, a događaji se upisuju i u kanal postavljen preko
+`/setlogin`. Ban/unban akcije napravljene direktno u Discordu takođe se
+evidentiraju. Bez dozvole **View Audit Log**, moderator može biti prikazan kao
+nepoznat, ali sam događaj se i dalje bilježi.
 
 Komanda `.pomoc` može imati poseban kanal:
 
@@ -373,7 +394,7 @@ Komandu može koristiti vlasnik bota ili vlasnik servera. Poruka sadrži pozivni
 link i pregled glavnih komandi. Broj je opcionalan (podrazumijevano 100; raspon
 1–100). Botovi se preskaču. Završni izvještaj razdvaja poslato, Discord odbijene
 DM-ove i druge HTTP greške. Bot ne može zaobići članske postavke privatnosti.
-Ako je `/setlogin` podešen, `.poruka` se mora pokrenuti u tom komandnom kanalu.
+`.poruka` nije ograničena na evidencijski kanal `/setlogin`.
 
 ### Ljubav i veze
 
@@ -560,7 +581,7 @@ ljubav_data.json
 
 U njemu se čuvaju veze, brakovi, djeca, XP, novac, bankovni račun,
 inventar, kuće, ribolov, podešeni kanali, Info panel i iskorištene welcome
-poruke, kao i stanje counting igara.
+poruke, stanje counting igara, statistika poruka po kanalu i voice vrijeme.
 
 Redovno napravi backup tog fajla.
 
@@ -572,8 +593,8 @@ kopiju.
 
 Provjereno:
 
-- 78 prefix komandi
-- 21 slash komanda registrovana u kodu
+- 79 prefix komandi
+- 26 slash komandi registrovanih u kodu
 - nema dupliranih naziva komandi
 - Python sintaksa prolazi bez greške
 - nema hardkodovanog Discord tokena
@@ -583,6 +604,9 @@ Provjereno:
 - interaktivna dugmad koriste Discord custom emoji-je, a panel komande ažuriraju postojeću objavu umjesto da je dupliraju
 - counting stanje se čuva trajno, a tačan unos se vraća kao reply embed
 - Kaladont mijenja dvije priložene slike naizmjenično; Info panel ima dugme za sve komande
+- `/setlogin` postavlja kanal za logove dolazaka, banova i unbanova; više ne ograničava komande
+- `.evidencija` i `/evidencija` prikazuju poruke i voice vrijeme po kanalu; `/topaktivnost` rangira članove
+- `/ban` i `/unban` šalju privatnu potvrdu i prave moderacijske evidencijske embede
 
 ### Evidencija ljubavnih aktivnosti
 

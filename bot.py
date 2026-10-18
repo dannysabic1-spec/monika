@@ -21,7 +21,7 @@ except ImportError:
 #              KONFIGURACIJA
 # ══════════════════════════════════════════════
 BOT_NAME   = "MONIKA BOT"
-VERSION    = "v4.4"
+VERSION    = "v4.5"
 TOKEN      = os.environ.get("DISCORD_TOKEN")
 BOT_PREFIX = "."
 
@@ -380,6 +380,7 @@ def load_data() -> dict:
         "stanovi": {},
         "ribolov": {},
         "kanali": {},
+        "activity": {},
         "ekonomija": {},
         "albumi": {},
         "zakletva": {},
@@ -556,6 +557,7 @@ def get_kanali(data: dict, guild_id: int) -> dict:
             "casino": None,
             "pomoc": None,
             "login": None,
+            "member_log": None,
         }
     defaults = {
         "ljubav": None,
@@ -566,6 +568,7 @@ def get_kanali(data: dict, guild_id: int) -> dict:
         "casino": None,
         "pomoc": None,
         "login": None,
+        "member_log": None,
     }
     for tip, value in defaults.items():
         if tip not in data["kanali"][key]:
@@ -653,6 +656,195 @@ def get_support(data: dict, guild_id: int) -> dict:
         if k not in cfg:
             cfg[k] = v
     return cfg
+
+def get_activity_user(data: dict, guild_id: int, user_id: int) -> dict:
+    """Vrati trajno spremljenu statistiku aktivnosti za člana servera."""
+    guild_data = data.setdefault("activity", {}).setdefault(str(guild_id), {})
+    users = guild_data.setdefault("users", {})
+    stats = users.setdefault(str(user_id), {
+        "messages": 0,
+        "message_channels": {},
+        "voice_seconds": 0.0,
+        "voice_channels": {},
+        "voice_session": None,
+    })
+    stats.setdefault("messages", 0)
+    stats.setdefault("message_channels", {})
+    stats.setdefault("voice_seconds", 0.0)
+    stats.setdefault("voice_channels", {})
+    stats.setdefault("voice_session", None)
+    return stats
+
+def record_member_message(message: discord.Message):
+    """Sačuvaj svaku korisničku poruku po serveru i tekstualnom kanalu."""
+    if not message.guild or message.author.bot:
+        return
+    data = load_data()
+    stats = get_activity_user(data, message.guild.id, message.author.id)
+    stats["messages"] = int(stats.get("messages", 0)) + 1
+    channel_counts = stats.setdefault("message_channels", {})
+    channel_key = str(message.channel.id)
+    channel_counts[channel_key] = int(channel_counts.get(channel_key, 0)) + 1
+    save_data(data)
+
+def account_voice_session(stats: dict, now: float):
+    """Dodaj proteklo vrijeme aktivne voice sesije u ukupnu statistiku."""
+    session = stats.get("voice_session")
+    if not isinstance(session, dict):
+        return
+    try:
+        started = float(session.get("last_accounted_at", now))
+        elapsed = max(0.0, now - started)
+        channel_key = str(session["channel_id"])
+    except (KeyError, TypeError, ValueError):
+        stats["voice_session"] = None
+        return
+    stats["voice_seconds"] = float(stats.get("voice_seconds", 0.0)) + elapsed
+    channel_times = stats.setdefault("voice_channels", {})
+    channel_times[channel_key] = float(channel_times.get(channel_key, 0.0)) + elapsed
+    session["last_accounted_at"] = now
+
+def format_activity_duration(seconds: float) -> str:
+    total_minutes = max(0, int(float(seconds or 0) // 60))
+    days, remainder = divmod(total_minutes, 24 * 60)
+    hours, minutes = divmod(remainder, 60)
+    if days:
+        return f"{days} d, {hours} h"
+    if hours:
+        return f"{hours} h, {minutes} min"
+    return f"{minutes} min"
+
+def build_activity_embed(
+    guild: discord.Guild,
+    member: discord.Member,
+    stats: dict,
+) -> discord.Embed:
+    """Napravi čitljiv pregled poruka i vremena provedenog u voice kanalima."""
+    embed = discord.Embed(
+        title=f"{CUSTOM_EMOJI['chart']} Aktivnost člana",
+        description=(
+            f"{CUSTOM_EMOJI['user']} **Član:** {member.mention}\n"
+            f"{CUSTOM_EMOJI['message']} **Ukupno poruka:** "
+            f"{int(stats.get('messages', 0)):,}\n"
+            f"{CUSTOM_EMOJI['mic']} **Voice vrijeme:** "
+            f"{format_activity_duration(stats.get('voice_seconds', 0))}"
+        ),
+        color=_LP,
+    )
+    message_lines = []
+    for channel_id, count in sorted(
+        stats.get("message_channels", {}).items(),
+        key=lambda item: int(item[1]),
+        reverse=True,
+    )[:10]:
+        channel = guild.get_channel(int(channel_id))
+        name = channel.mention if channel else f"<#{channel_id}>"
+        message_lines.append(f"{name} — **{int(count):,}**")
+    embed.add_field(
+        name=f"{CUSTOM_EMOJI['message']} Poruke po kanalu",
+        value="\n".join(message_lines) or "Još nema zabilježenih poruka.",
+        inline=False,
+    )
+    voice_lines = []
+    for channel_id, seconds in sorted(
+        stats.get("voice_channels", {}).items(),
+        key=lambda item: float(item[1]),
+        reverse=True,
+    )[:10]:
+        channel = guild.get_channel(int(channel_id))
+        name = channel.mention if channel else f"<#{channel_id}>"
+        voice_lines.append(f"{name} — **{format_activity_duration(seconds)}**")
+    embed.add_field(
+        name=f"{CUSTOM_EMOJI['volume']} Voice po kanalu",
+        value="\n".join(voice_lines) or "Još nema zabilježenog voice vremena.",
+        inline=False,
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    return embed
+
+async def send_member_log(guild: discord.Guild, embed: discord.Embed):
+    """Pošalji evidencijski embed u kanal podešen preko /setlogin."""
+    data = load_data()
+    channel_id = get_kanali(data, guild.id).get("member_log")
+    channel = guild.get_channel(int(channel_id)) if channel_id else None
+    if not isinstance(channel, discord.TextChannel):
+        return
+    try:
+        await channel.send(
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    except (discord.Forbidden, discord.HTTPException) as exc:
+        print(f"[LOG] Ne mogu poslati evidenciju u kanal {channel_id}: {exc}")
+
+async def find_audit_actor(
+    guild: discord.Guild,
+    target_id: int,
+    action: discord.AuditLogAction,
+):
+    """Pokušaj povezati ban/unban event s moderatorom i razlogom."""
+    try:
+        async for entry in guild.audit_logs(limit=8, action=action):
+            target = getattr(entry, "target", None)
+            if getattr(target, "id", None) != target_id:
+                continue
+            created_at = getattr(entry, "created_at", None)
+            if created_at and (datetime.now(timezone.utc) - created_at).total_seconds() > 30:
+                break
+            return getattr(entry, "user", None), getattr(entry, "reason", None)
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+    return None, None
+
+async def voice_activity_checkpoint_loop():
+    """Svake minute upiši voice vrijeme kako bi preživjelo restart procesa."""
+    while not bot.is_closed():
+        await asyncio.sleep(60)
+        data = load_data()
+        now = datetime.now(timezone.utc).timestamp()
+        changed = False
+        for guild_id, guild_data in data.get("activity", {}).items():
+            users = guild_data.get("users", {}) if isinstance(guild_data, dict) else {}
+            for stats in users.values():
+                if isinstance(stats, dict) and isinstance(stats.get("voice_session"), dict):
+                    account_voice_session(stats, now)
+                    changed = True
+        if changed:
+            save_data(data)
+
+def reconcile_voice_sessions():
+    """Ne uračunava vrijeme dok je bot bio ugašen i obnavlja aktivne sesije."""
+    data = load_data()
+    now = datetime.now(timezone.utc).timestamp()
+    active_members = {}
+    for guild in bot.guilds:
+        for channel in (*guild.voice_channels, *guild.stage_channels):
+            for member in channel.members:
+                if not member.bot:
+                    active_members[(str(guild.id), str(member.id))] = channel.id
+
+    for guild_id, guild_data in data.get("activity", {}).items():
+        users = guild_data.get("users", {}) if isinstance(guild_data, dict) else {}
+        for user_id, stats in users.items():
+            if not isinstance(stats, dict):
+                continue
+            session = stats.get("voice_session")
+            current_channel = active_members.get((guild_id, user_id))
+            if current_channel is None:
+                stats["voice_session"] = None
+            elif isinstance(session, dict):
+                # Nastavi bez uračunavanja perioda kada je bot bio offline.
+                session["channel_id"] = current_channel
+                session["last_accounted_at"] = now
+
+    for (guild_id, user_id), channel_id in active_members.items():
+        stats = get_activity_user(data, int(guild_id), int(user_id))
+        if not isinstance(stats.get("voice_session"), dict):
+            stats["voice_session"] = {
+                "channel_id": channel_id,
+                "last_accounted_at": now,
+            }
+    save_data(data)
 
 def message_has_component(message: discord.Message, custom_id: str) -> bool:
     """Provjeri da li botova poruka sadrži dugme određenog panela."""
@@ -785,23 +977,6 @@ async def check_kanal(ctx: commands.Context, tip: str) -> bool:
         ))
         return False
     return True
-
-async def check_login_channel(message: discord.Message) -> bool:
-    """Ako je podešen login kanal, prefix komande rade samo tamo."""
-    if not message.guild or not message.content.startswith(BOT_PREFIX):
-        return True
-    channels = get_kanali(load_data(), message.guild.id)
-    login_id = channels.get("login")
-    if not login_id or message.channel.id == login_id:
-        return True
-    channel = message.guild.get_channel(login_id)
-    mention = channel.mention if channel else f"<#{login_id}>"
-    await message.channel.send(embed=discord.Embed(
-        title="Komande su zaključane",
-        description=f"> Sve komande bota možeš koristiti samo u kanalu {mention}.",
-        color=_LP,
-    ))
-    return False
 
 async def check_pomoc_channel(ctx: commands.Context) -> bool:
     """Pomoć je dostupna samo u kanalu koji je postavio administrator."""
@@ -1023,6 +1198,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members         = True
 intents.reactions       = True
+intents.voice_states    = True
 
 bot = commands.Bot(command_prefix=BOT_PREFIX, intents=intents, help_command=None)
 
@@ -1030,8 +1206,8 @@ bot = commands.Bot(command_prefix=BOT_PREFIX, intents=intents, help_command=None
 PROCESSED_SLASH_INTERACTIONS = {}
 SLASH_INTERACTION_DEDUP_SECONDS = 900
 
-async def _tree_login_check(interaction: discord.Interaction) -> bool:
-    """Primijeni /setlogin i na slash komande, uz izuzetke za podešavanje."""
+async def _tree_interaction_check(interaction: discord.Interaction) -> bool:
+    """Spriječi ponovnu obradu istog slash interaction ID-a."""
     now = asyncio.get_running_loop().time()
     previous = PROCESSED_SLASH_INTERACTIONS.get(interaction.id)
     if previous is not None and now - previous < SLASH_INTERACTION_DEDUP_SECONDS:
@@ -1055,28 +1231,9 @@ async def _tree_login_check(interaction: discord.Interaction) -> bool:
             for interaction_id in oldest:
                 PROCESSED_SLASH_INTERACTIONS.pop(interaction_id, None)
 
-    if not interaction.guild or not interaction.channel:
-        return True
-    command_name = getattr(getattr(interaction, "command", None), "name", "")
-    if command_name in {"setlogin", "setpomoc", "setreport"}:
-        return True
-    channels = get_kanali(load_data(), interaction.guild.id)
-    login_id = channels.get("login")
-    if not login_id or interaction.channel.id == login_id:
-        return True
-    channel = interaction.guild.get_channel(login_id)
-    mention = channel.mention if channel else f"<#{login_id}>"
-    await interaction.response.send_message(
-        embed=discord.Embed(
-            title="Komande su zaključane",
-            description=f"> Ovu komandu koristi u kanalu {mention}.",
-            color=_LP,
-        ),
-        ephemeral=True,
-    )
-    return False
+    return True
 
-bot.tree.interaction_check = _tree_login_check
+bot.tree.interaction_check = _tree_interaction_check
 
 async def _is_bot_owner_or_admin(interaction: discord.Interaction) -> bool:
     """Dozvoli upravljanje vlasniku bota ili server administratoru."""
@@ -1447,6 +1604,7 @@ class InfoView(discord.ui.View):
                 "> `.veza @Korisnik` — ljubavni sistem\n"
                 "> `.rad` i `.market` — virtuelna ekonomija\n"
                 "> `.pecanje` — ribolov i skupljanje coina\n"
+                "> `.evidencija` — broj poruka i voice vrijeme\n"
                 "> `.topljubav`, `.topbogati` i `.top-ribar` — rang-liste\n"
                 "> Prati razgovore, upoznaj ekipu i učestvuj u eventima!"
             ),
@@ -2030,6 +2188,8 @@ MONIKA_GUESS_INTERVAL_SECONDS = 60 * 60
 MONIKA_WORD_INTERVAL_SECONDS = 70 * 60
 MONIKA_CHALLENGE_DURATION_SECONDS = 2 * 60
 MONIKA_GUESS_TASK = None
+VOICE_ACTIVITY_TASK = None
+VOICE_ACTIVITY_RECONCILED = False
 POMOC_BATCH_MODE = False
 GIVEAWAY_TASKS = {}
 GIVEAWAY_DURATION_SECONDS = 24 * 60 * 60
@@ -2443,14 +2603,13 @@ async def on_message(message: discord.Message):
     """Ručno proslijedi poruke command handleru i Moniki."""
     if message.author.bot:
         return
+    record_member_message(message)
     if message.guild and message.content.startswith(BOT_PREFIX):
         command_name = message.content[len(BOT_PREFIX):].split(maxsplit=1)[0].lower()
         ctx = await bot.get_context(message)
         if command_name == "pomoc":
             if not await check_pomoc_channel(ctx):
                 return
-        elif command_name not in {"setlogin", "setpomoc", "setreport"} and not await check_login_channel(message):
-            return
     # Jedna Discord poruka smije proizvesti najviše jedan odgovor igre.
     if message.id in PROCESSED_GAME_MESSAGE_IDS:
         return
@@ -2563,6 +2722,7 @@ async def on_message(message: discord.Message):
 @bot.event
 async def on_ready():
     global PERSISTENT_VIEWS_REGISTERED, MONIKA_GUESS_TASK
+    global VOICE_ACTIVITY_TASK, VOICE_ACTIVITY_RECONCILED
     await load_application_emojis()
     synced_commands = await bot.tree.sync()
     print(
@@ -2593,6 +2753,11 @@ async def on_ready():
         PERSISTENT_VIEWS_REGISTERED = True
     if MONIKA_GUESS_TASK is None or MONIKA_GUESS_TASK.done():
         MONIKA_GUESS_TASK = asyncio.create_task(monika_guess_loop())
+    if not VOICE_ACTIVITY_RECONCILED:
+        reconcile_voice_sessions()
+        VOICE_ACTIVITY_RECONCILED = True
+    if VOICE_ACTIVITY_TASK is None or VOICE_ACTIVITY_TASK.done():
+        VOICE_ACTIVITY_TASK = asyncio.create_task(voice_activity_checkpoint_loop())
     for giveaway_id, giveaway in load_data().get("giveaways", {}).items():
         if not giveaway.get("ended"):
             bot.add_view(GiveawayView(giveaway_id))
@@ -2619,6 +2784,19 @@ async def on_ready():
 async def on_member_join(member: discord.Member):
     """Šalje welcome poruku u podešeni kanal i privatni inbox novog člana."""
     print(f"[WELCOME] Novi član {member.id} na serveru {member.guild.id}.")
+    join_embed = discord.Embed(
+        title=f"{CUSTOM_EMOJI['users']} Novi član",
+        description=(
+            f"{CUSTOM_EMOJI['user']} {member.mention} se pridružio/la serveru.\n"
+            f"{CUSTOM_EMOJI['calendar']} Kreiran Discord nalog: "
+            f"<t:{int(member.created_at.timestamp())}:R>"
+        ),
+        color=_LP,
+        timestamp=datetime.now(timezone.utc),
+    )
+    join_embed.set_thumbnail(url=member.display_avatar.url)
+    await send_member_log(member.guild, join_embed)
+
     data = load_data()
     cfg = get_welcome(data, member.guild.id)
     channel_id = cfg.get("channel_id")
@@ -2729,6 +2907,77 @@ async def on_member_join(member: discord.Member):
             print(f"[WELCOME] Podešena uloga {role_id} više ne postoji.")
 
 @bot.event
+async def on_voice_state_update(
+    member: discord.Member,
+    before: discord.VoiceState,
+    after: discord.VoiceState,
+):
+    """Broji vrijeme u voice kanalima i čuva ga kroz bot restart."""
+    if member.bot or before.channel == after.channel:
+        return
+    data = load_data()
+    stats = get_activity_user(data, member.guild.id, member.id)
+    now = datetime.now(timezone.utc).timestamp()
+    account_voice_session(stats, now)
+    stats["voice_session"] = None
+    if after.channel is not None:
+        stats["voice_session"] = {
+            "channel_id": after.channel.id,
+            "last_accounted_at": now,
+        }
+    save_data(data)
+
+@bot.event
+async def on_member_ban(guild: discord.Guild, user: discord.User):
+    """Evidentiraj banove napravljene preko bota ili ručno u Discordu."""
+    await asyncio.sleep(0.5)
+    moderator, reason = await find_audit_actor(
+        guild, user.id, discord.AuditLogAction.ban
+    )
+    embed = discord.Embed(
+        title=f"{CUSTOM_EMOJI['ban']} Član banovan",
+        description=f"{CUSTOM_EMOJI['user']} **Član:** {user} (`{user.id}`)",
+        color=_LP,
+        timestamp=datetime.now(timezone.utc),
+    )
+    embed.add_field(
+        name=f"{CUSTOM_EMOJI['shield']} Moderator",
+        value=str(moderator) if moderator else "Nije moguće utvrditi",
+        inline=True,
+    )
+    embed.add_field(
+        name=f"{CUSTOM_EMOJI['file']} Razlog",
+        value=(reason or "Nije naveden")[:1024],
+        inline=False,
+    )
+    await send_member_log(guild, embed)
+
+@bot.event
+async def on_member_unban(guild: discord.Guild, user: discord.User):
+    """Evidentiraj unbanove napravljene preko bota ili ručno u Discordu."""
+    await asyncio.sleep(0.5)
+    moderator, reason = await find_audit_actor(
+        guild, user.id, discord.AuditLogAction.unban
+    )
+    embed = discord.Embed(
+        title=f"{CUSTOM_EMOJI['check']} Ban uklonjen",
+        description=f"{CUSTOM_EMOJI['user']} **Član:** {user} (`{user.id}`)",
+        color=_LP,
+        timestamp=datetime.now(timezone.utc),
+    )
+    embed.add_field(
+        name=f"{CUSTOM_EMOJI['shield']} Moderator",
+        value=str(moderator) if moderator else "Nije moguće utvrditi",
+        inline=True,
+    )
+    embed.add_field(
+        name=f"{CUSTOM_EMOJI['file']} Razlog",
+        value=(reason or "Nije naveden")[:1024],
+        inline=False,
+    )
+    await send_member_log(guild, embed)
+
+@bot.event
 async def on_command_error(ctx: commands.Context, error):
     if isinstance(error, commands.MissingRequiredArgument):
         await ctx.send(embed=discord.Embed(
@@ -2796,8 +3045,8 @@ async def setkanal(interaction: discord.Interaction, tip: str, kanal: discord.Te
         color=_LP
     ))
 
-@bot.tree.command(name="setlogin", description="Vlasnik/admin: ograniči komande na jedan kanal")
-@app_commands.describe(kanal="Kanal u kojem se mogu koristiti sve prefix i slash komande")
+@bot.tree.command(name="setlogin", description="Vlasnik/admin: postavi kanal evidencije")
+@app_commands.describe(kanal="Kanal za logove dolazaka, banova i unbanova")
 async def setlogin(interaction: discord.Interaction, kanal: discord.TextChannel):
     if not interaction.guild:
         await interaction.response.send_message("Ova komanda radi samo na serveru.", ephemeral=True)
@@ -2809,13 +3058,226 @@ async def setlogin(interaction: discord.Interaction, kanal: discord.TextChannel)
         )
         return
     data = load_data()
-    get_kanali(data, interaction.guild.id)["login"] = kanal.id
+    get_kanali(data, interaction.guild.id)["member_log"] = kanal.id
     save_data(data)
     await interaction.response.send_message(embed=discord.Embed(
-        title="Login kanal podešen",
-        description=f"> Sve prefix i slash komande sada se koriste samo u {kanal.mention}.",
+        title=f"{CUSTOM_EMOJI['settings']} Kanal evidencije podešen",
+        description=(
+            f"{CUSTOM_EMOJI['check']} Dolasci, banovi i unbanovi "
+            f"biće zabilježeni u {kanal.mention}.\n"
+            f"{CUSTOM_EMOJI['check']} Komande više nisu ograničene na jedan kanal."
+        ),
         color=_LP,
     ), ephemeral=True)
+
+@bot.tree.command(name="evidencija", description="Prikaži broj poruka i voice vrijeme člana")
+@app_commands.describe(clan="Član čiju evidenciju želiš vidjeti (podrazumijevano: ti)")
+async def evidencija(
+    interaction: discord.Interaction,
+    clan: discord.Member = None,
+):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "Ova komanda radi samo na serveru.", ephemeral=True
+        )
+        return
+    member = clan or interaction.user
+    data = load_data()
+    stats = get_activity_user(data, interaction.guild.id, member.id)
+    await interaction.response.send_message(
+        embed=build_activity_embed(interaction.guild, member, stats),
+        ephemeral=True,
+    )
+
+@bot.command(name="evidencija")
+async def evidencija_prefix(
+    ctx: commands.Context,
+    clan: discord.Member = None,
+):
+    if not ctx.guild:
+        return
+    member = clan or ctx.author
+    data = load_data()
+    stats = get_activity_user(data, ctx.guild.id, member.id)
+    await ctx.send(embed=build_activity_embed(ctx.guild, member, stats))
+
+@bot.tree.command(name="topaktivnost", description="Prikaži najaktivnije članove servera")
+@app_commands.describe(vrsta="Odaberi rangiranje po porukama ili voice vremenu")
+@app_commands.choices(vrsta=[
+    app_commands.Choice(name="Poruke", value="messages"),
+    app_commands.Choice(name="Voice vrijeme", value="voice"),
+])
+async def topaktivnost(
+    interaction: discord.Interaction,
+    vrsta: app_commands.Choice[str],
+):
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message(
+            "Ova komanda radi samo na serveru.", ephemeral=True
+        )
+        return
+    data = load_data()
+    guild_activity = data.get("activity", {}).get(str(guild.id), {})
+    users = guild_activity.get("users", {}) if isinstance(guild_activity, dict) else {}
+    key = "messages" if vrsta.value == "messages" else "voice_seconds"
+    ranked = sorted(
+        users.items(),
+        key=lambda item: float(item[1].get(key, 0)) if isinstance(item[1], dict) else 0,
+        reverse=True,
+    )
+    lines = []
+    for user_id, stats in ranked:
+        if len(lines) >= 10:
+            break
+        member = guild.get_member(int(user_id))
+        if member and member.bot:
+            continue
+        amount = int(stats.get(key, 0))
+        if key == "voice_seconds":
+            amount_text = format_activity_duration(amount)
+        else:
+            amount_text = f"{amount:,} poruka"
+        lines.append(f"**{len(lines) + 1}.** <@{user_id}> — {amount_text}")
+    title = (
+        f"{CUSTOM_EMOJI['message']} Top članovi po porukama"
+        if key == "messages"
+        else f"{CUSTOM_EMOJI['mic']} Top članovi po voice vremenu"
+    )
+    embed = discord.Embed(
+        title=title,
+        description="\n".join(lines) or "Još nema zabilježene aktivnosti.",
+        color=_LP,
+    )
+    await interaction.response.send_message(
+        embed=embed,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+
+@bot.tree.command(name="ban", description="Ban član servera i upiši razlog")
+@app_commands.default_permissions(ban_members=True)
+@app_commands.checks.has_permissions(ban_members=True)
+@app_commands.describe(clan="Član koji se banjuje", razlog="Razlog bana")
+async def ban_member(
+    interaction: discord.Interaction,
+    clan: discord.Member,
+    razlog: str = "Nije naveden",
+):
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message(
+            "Ova komanda radi samo na serveru.", ephemeral=True
+        )
+        return
+    bot_member = guild.me
+    if clan.id == guild.owner_id or (bot.user and clan.id == bot.user.id):
+        await interaction.response.send_message(
+            f"{CUSTOM_EMOJI['close']} Ovaj član ne može biti banovan ovom komandom.",
+            ephemeral=True,
+        )
+        return
+    if (
+        interaction.user.id != guild.owner_id
+        and clan.top_role >= interaction.user.top_role
+    ):
+        await interaction.response.send_message(
+            f"{CUSTOM_EMOJI['close']} Ne možeš banovati člana s jednakom ili višom ulogom.",
+            ephemeral=True,
+        )
+        return
+    if bot_member is None or clan.top_role >= bot_member.top_role:
+        await interaction.response.send_message(
+            f"{CUSTOM_EMOJI['close']} Botova uloga mora biti iznad uloge tog člana.",
+            ephemeral=True,
+        )
+        return
+    safe_reason = (razlog or "Nije naveden").strip()[:450]
+    try:
+        await clan.ban(reason=safe_reason)
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            f"{CUSTOM_EMOJI['close']} Discord je odbio ban. Provjeri dozvole i redoslijed uloga.",
+            ephemeral=True,
+        )
+        return
+    except discord.HTTPException as exc:
+        await interaction.response.send_message(
+            f"{CUSTOM_EMOJI['close']} Ban nije uspio: {exc}", ephemeral=True
+        )
+        return
+    embed = discord.Embed(
+        title=f"{CUSTOM_EMOJI['ban']} Ban izvršen",
+        description=(
+            f"{CUSTOM_EMOJI['user']} **Član:** {clan} (`{clan.id}`)\n"
+            f"{CUSTOM_EMOJI['shield']} **Moderator:** {interaction.user.mention}\n"
+            f"{CUSTOM_EMOJI['file']} **Razlog:** {safe_reason}"
+        ),
+        color=_LP,
+    )
+    await interaction.response.send_message(
+        embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none()
+    )
+
+@bot.tree.command(name="unban", description="Ukloni ban pomoću Discord korisničkog ID-a")
+@app_commands.default_permissions(ban_members=True)
+@app_commands.checks.has_permissions(ban_members=True)
+@app_commands.describe(
+    clan_id="Discord ID banovanog člana",
+    razlog="Razlog uklanjanja bana",
+)
+async def unban_member(
+    interaction: discord.Interaction,
+    clan_id: str,
+    razlog: str = "Nije naveden",
+):
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message(
+            "Ova komanda radi samo na serveru.", ephemeral=True
+        )
+        return
+    if not clan_id.isdigit():
+        await interaction.response.send_message(
+            f"{CUSTOM_EMOJI['close']} Unesi samo numerički Discord ID.",
+            ephemeral=True,
+        )
+        return
+    user_id = int(clan_id)
+    safe_reason = (razlog or "Nije naveden").strip()[:450]
+    try:
+        await guild.unban(
+            discord.Object(id=user_id),
+            reason=safe_reason,
+        )
+    except discord.NotFound:
+        await interaction.response.send_message(
+            f"{CUSTOM_EMOJI['close']} Taj ID nije pronađen na listi banovanih članova.",
+            ephemeral=True,
+        )
+        return
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            f"{CUSTOM_EMOJI['close']} Bot nema dozvolu Ban Members.",
+            ephemeral=True,
+        )
+        return
+    except discord.HTTPException as exc:
+        await interaction.response.send_message(
+            f"{CUSTOM_EMOJI['close']} Unban nije uspio: {exc}", ephemeral=True
+        )
+        return
+    embed = discord.Embed(
+        title=f"{CUSTOM_EMOJI['check']} Unban izvršen",
+        description=(
+            f"{CUSTOM_EMOJI['user']} **ID člana:** `{user_id}`\n"
+            f"{CUSTOM_EMOJI['shield']} **Moderator:** {interaction.user.mention}\n"
+            f"{CUSTOM_EMOJI['file']} **Razlog:** {safe_reason}"
+        ),
+        color=_LP,
+    )
+    await interaction.response.send_message(
+        embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none()
+    )
 
 @bot.tree.command(name="setpomoc", description="Vlasnik/admin: postavi kanal za .pomoc")
 @app_commands.describe(kanal="Kanal u kojem članovi smiju koristiti .pomoc")
@@ -3327,7 +3789,7 @@ async def staff_postavi(
     embed = discord.Embed(
         title=f"{CUSTOM_EMOJI['file']} STAFF PRIJAVA",
         description=(
-            "Otvorene su prijave za Staff tim servera!\n"
+            f"{CUSTOM_EMOJI['briefcase']} Otvorene su prijave za Staff tim servera!\n"
             f"{CUSTOM_EMOJI['hand']} Klikni dugme ispod i popuni svoje podatke.\n"
             f"{CUSTOM_EMOJI['lock']} Odgovori su privatni dok ne pošalješ prijavu."
         ),
@@ -6136,6 +6598,8 @@ def pomoc_pages():
                 "> **Rang-liste**\n"
                 "> `.topljubav` · `.topxp` · `.topbogati`\n"
                 "> `.topparovi` · `.topstanovi` · `.top-ribar`\n\n"
+                "> `.evidencija [@Korisnik]` — Poruke i voice aktivnost\n"
+                "> `/topaktivnost` — Top članovi po porukama ili voice vremenu\n\n"
                 "> Klikni dugmad ispod poruke za promjenu stranice."
             ),
             color=_LP,
@@ -6335,7 +6799,8 @@ async def pomoc(ctx: commands.Context, stranica: str = "1"):
         ), inline=False)
         e.add_field(name="🏆 Leaderboardi", value=(
             "> `.topljubav` `.topxp` `.topbogati`\n"
-            "> `.topparovi` `.topstanovi` `.top-ribar`"
+            "> `.topparovi` `.topstanovi` `.top-ribar`\n"
+            "> `.evidencija [@Korisnik]` — Poruke i voice vrijeme"
         ), inline=False)
         e.set_footer(text=f"Strana 3/3 • {BOT_NAME} {VERSION}")
         await send_pomoc_dm(ctx, e)
@@ -7053,6 +7518,7 @@ async def poruka(
             "> `.casino coin <ulog>` · `.casino slot <ulog>` · `.counting 1`\n"
             "> `.toplo-hladno` · `.kaladont` · `.pijte` · `.film` · `.istina` · `.izazov`\n"
             "> `.pecanje` · `.ribnjak` · `.prodaj` · `.ribar`\n"
+            "> `.evidencija [@Korisnik]` — Broj poruka i voice vrijeme\n"
             "> `.topljubav` · `.topxp` · `.topbogati` · `.topparovi` · `.topstanovi` · `.top-ribar`"
         ),
         inline=False,
@@ -7273,6 +7739,8 @@ async def opis_slash(interaction: discord.Interaction):
                 "> `.topparovi` — Najuspješniji parovi.\n"
                 "> `.topstanovi` — Najbolje kuće i stanovi.\n"
                 "> `.top-ribar` — Najuspješniji ribari.\n"
+                "> `.evidencija [@Korisnik]` — Broj poruka i voice vrijeme.\n"
+                "> `/topaktivnost` — Top članovi po porukama ili voice vremenu.\n"
                 ">\n"
                 "> **Pomoć i pregledi**\n"
                 "> `.pomoc` — Prva stranica pomoći.\n"
