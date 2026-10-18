@@ -251,6 +251,13 @@ def welcome_emoji(guild, key: str) -> str:
         return str(server_emoji)
     return WELCOME_EMOJI.get(key, CUSTOM_EMOJI[fallback_key])
 
+def component_custom_emoji(value: str) -> discord.PartialEmoji:
+    """Pretvori Discord zapis custom emoji-ja u format za dugmad."""
+    emoji = discord.PartialEmoji.from_str(value)
+    if emoji.id is None:
+        raise ValueError(f"Očekivan je custom emoji, dobijeno: {value}")
+    return emoji
+
 try:
     sys.stdout.reconfigure(line_buffering=True)
 except Exception:
@@ -1035,19 +1042,23 @@ class WelcomeView(discord.ui.View):
         self.novi_clan_id = novi_clan_id
         self.pozdrav_channel_id = pozdrav_channel_id
 
+        guild = bot.get_guild(guild_id) if guild_id else None
+        greet_emoji = component_custom_emoji(welcome_emoji(guild, "love"))
+        for child in self.children:
+            if isinstance(child, discord.ui.Button) and child.custom_id == "squad_welcome_greet":
+                child.emoji = greet_emoji
+
         if music_channel_id and guild_id:
             self.add_item(discord.ui.Button(
                 label="play music",
-                # Discord može odbiti application emoji ID u component dugmetu.
-                # Unicode emoji ostaje validan i nakon restarta ili promjene emoji-ja.
-                emoji="🎵",
+                emoji=component_custom_emoji(CUSTOM_EMOJI["music"]),
                 style=discord.ButtonStyle.link,
                 url=f"https://discord.com/channels/{guild_id}/{music_channel_id}",
             ))
         else:
             self.add_item(discord.ui.Button(
                 label="play music",
-                emoji="🎵",
+                emoji=component_custom_emoji(CUSTOM_EMOJI["music"]),
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
                 custom_id="squad_welcome_music_disabled",
@@ -1055,7 +1066,10 @@ class WelcomeView(discord.ui.View):
 
     @discord.ui.button(
         label="Poželi dobrodošlicu",
-        emoji="💗",
+        emoji=discord.PartialEmoji(
+            name="imloved5",
+            id=1504507385039818842,
+        ),
         style=discord.ButtonStyle.secondary,
         custom_id="squad_welcome_greet",
     )
@@ -1076,7 +1090,8 @@ class WelcomeView(discord.ui.View):
             saved_greetings = data.setdefault("welcome_greetings", {})
             if message_id in WELCOME_GREETINGS or str(message_id) in saved_greetings:
                 await interaction.response.send_message(
-                    "🌹 Dobrodošlicu je već poslala druga osoba. "
+                    f"{welcome_emoji(interaction.guild, 'love')} "
+                    "Dobrodošlicu je već poslala druga osoba. "
                     "Ovo dugme može biti iskorišteno samo jednom.",
                     ephemeral=True,
                 )
@@ -1104,7 +1119,7 @@ class WelcomeView(discord.ui.View):
         guild_name = interaction.guild.name if interaction.guild else "server"
 
         await interaction.response.send_message(
-            "✅ Hvala! Tvoja dobrodošlica je uspješno poslana. "
+            f"{CUSTOM_EMOJI['check']} Hvala! Tvoja dobrodošlica je uspješno poslana. "
             "Dugme je sada iskorišteno i više niko ne može kliknuti na njega.",
             ephemeral=True,
         )
@@ -1135,7 +1150,7 @@ class WelcomeView(discord.ui.View):
             await output_channel.send(embed=embed)
 
 def build_welcome_embed(member, guild: discord.Guild, cfg: dict, test: bool = False):
-    """Isti welcome izgled za nove članove, test i pregled nakon podešavanja."""
+    """Kompaktna welcome poruka za nove članove, test i pregled podešavanja."""
     def mention(channel_key: str, fallback: str) -> str:
         channel_id = cfg.get(channel_key)
         return f"<#{channel_id}>" if channel_id else fallback
@@ -1146,39 +1161,19 @@ def build_welcome_embed(member, guild: discord.Guild, cfg: dict, test: bool = Fa
     pravila = mention("pravila_channel_id", "#pravila")
     chat = mention("chat_channel_id", "#chat")
     music = mention("music_channel_id", "nije podešen")
-    sada = datetime.now(timezone.utc).strftime("%H:%M")
     embed = discord.Embed(
-        title=f"{emoji('sparkles')} Dobrodošao/la na {guild.name}!",
+        title=(
+            f"{emoji('sparkles')} "
+            f"{'TEST • ' if test else ''}Dobrodošao/la na {guild.name}!"
+        ),
         description=(
-            f"{emoji('love')} {member.mention}, dobrodošao/la na "
-            f"**{guild.name}**!\n\n"
-            f"{emoji('fire')} Lijepo se smjesti, upoznaj ekipu i uživaj!"
+            f"{emoji('love')} {member.mention} — dobrodošao/la!\n"
+            f"{emoji('ghost')} {pravila}  ·  {emoji('sharks')} {chat}  ·  "
+            f"{emoji('mooncat')} {music}\n"
+            f"{emoji('fire')} Lijepo se smjesti!  "
+            f"{emoji('crayon')} Klikni ispod da poželiš dobrodošlicu."
         ),
         color=_LP,
-    )
-    embed.add_field(
-        name=f"{emoji('ghost')} Pravila",
-        value=f"Prije početka pročitaj {pravila}.",
-        inline=True,
-    )
-    embed.add_field(
-        name=f"{emoji('sharks')} Chat",
-        value=f"Druži se sa članovima u {chat}.",
-        inline=True,
-    )
-    embed.add_field(
-        name=f"{emoji('mooncat')} Muzika",
-        value=f"Pronađi muziku u {music}.",
-        inline=True,
-    )
-    embed.add_field(
-        name=f"{emoji('crayon')} Počni ovdje",
-        value="Klikni na dugme **play music** ispod i istraži server.",
-        inline=False,
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_footer(
-        text=f"{BOT_NAME} {VERSION} • {'TEST' if test else 'danas u ' + sada}"
     )
     return embed
 
@@ -1248,10 +1243,20 @@ class InfoView(discord.ui.View):
 
     def __init__(self):
         super().__init__(timeout=None)
+        button_emojis = {
+            "squad_info_details": "info",
+            "squad_info_all_commands": "book",
+            "squad_info_gws_events": "gift",
+        }
+        for child in self.children:
+            if isinstance(child, discord.ui.Button) and child.custom_id in button_emojis:
+                child.emoji = component_custom_emoji(
+                    CUSTOM_EMOJI[button_emojis[child.custom_id]]
+                )
 
     @discord.ui.button(
         label="Info",
-        emoji="ℹ️",
+        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["info"]),
         style=discord.ButtonStyle.secondary,
         custom_id="squad_info_details",
     )
@@ -1269,7 +1274,7 @@ class InfoView(discord.ui.View):
         data = load_data()
         cfg = get_info(data, interaction.guild.id)
         embed = discord.Embed(
-            title=f"ℹ️ Informacije — {interaction.guild.name}",
+            title=f"{CUSTOM_EMOJI['info']} Informacije — {interaction.guild.name}",
             description=(
                 "> Dobrodošao/la na naš server! Ovdje možeš upoznati nove ljude, "
                 "zabaviti se i učestvovati u raznim aktivnostima."
@@ -1277,7 +1282,7 @@ class InfoView(discord.ui.View):
             color=_LP,
         )
         embed.add_field(
-            name="📜 Pravila servera",
+            name=f"{CUSTOM_EMOJI['shield']} Pravila servera",
             value=(
                 "> • Poštuj sve članove i osoblje.\n"
                 "> • Bez vrijeđanja, spama i nepotrebnog tagovanja.\n"
@@ -1288,7 +1293,7 @@ class InfoView(discord.ui.View):
             inline=False,
         )
         embed.add_field(
-            name="🏠 O serveru",
+            name=f"{CUSTOM_EMOJI['home']} O serveru",
             value=(
                 f"> **{interaction.guild.name}** je zajednica za druženje, "
                 "razgovor i zabavu."
@@ -1296,7 +1301,7 @@ class InfoView(discord.ui.View):
             inline=False,
         )
         embed.add_field(
-            name="🎮 Kako da se zabaviš",
+            name=f"{CUSTOM_EMOJI['game']} Kako da se zabaviš",
             value=(
                 "> `.pomoc` — sve komande bota\n"
                 "> `.veza @Korisnik` — ljubavni sistem\n"
@@ -1308,7 +1313,7 @@ class InfoView(discord.ui.View):
             inline=False,
         )
         embed.add_field(
-            name="🔤 Kaladont",
+            name=f"{CUSTOM_EMOJI['book']} Kaladont",
             value=(
                 "> Pokreni `.kaladont`, pa šalji riječi naizmjenično s drugim članovima.\n"
                 "> Uspješan odgovor prikazuje člana kao oznaku i riječ VELIKIM SLOVIMA.\n"
@@ -1318,7 +1323,7 @@ class InfoView(discord.ui.View):
         )
         if cfg.get("events_channel_id"):
             embed.add_field(
-                name="📅 Eventi",
+                name=f"{CUSTOM_EMOJI['calendar']} Eventi",
                 value=f"> Najave i detalji: <#{cfg['events_channel_id']}>",
                 inline=False,
             )
@@ -1329,7 +1334,7 @@ class InfoView(discord.ui.View):
 
     @discord.ui.button(
         label="Opis • sve komande",
-        emoji="📚",
+        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["book"]),
         style=discord.ButtonStyle.secondary,
         custom_id="squad_info_all_commands",
     )
@@ -1347,7 +1352,7 @@ class InfoView(discord.ui.View):
 
     @discord.ui.button(
         label="GWS & Events",
-        emoji="🎁",
+        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["gift"]),
         style=discord.ButtonStyle.secondary,
         custom_id="squad_info_gws_events",
     )
@@ -1368,7 +1373,7 @@ class InfoView(discord.ui.View):
         events = f"<#{cfg['events_channel_id']}>" if cfg.get("events_channel_id") else "nije podešen"
 
         embed = discord.Embed(
-            title="🎉 Giveaways & Events",
+            title=f"{CUSTOM_EMOJI['gift']} Giveaways & Events",
             description=(
                 "> Ovdje možeš pratiti nagradne igre, server evente i posebne objave.\n"
                 ">\n"
@@ -1377,17 +1382,17 @@ class InfoView(discord.ui.View):
             color=_LP,
         )
         embed.add_field(
-            name="🎁 Giveaways",
+            name=f"{CUSTOM_EMOJI['gift']} Giveaways",
             value=f"> Aktivni giveaway-i i nagrade: {gws}",
             inline=False,
         )
         embed.add_field(
-            name="📅 Events",
+            name=f"{CUSTOM_EMOJI['calendar']} Events",
             value=f"> Događaji i takmičenja: {events}",
             inline=False,
         )
         embed.add_field(
-            name="💡 Kako učestvovati",
+            name=f"{CUSTOM_EMOJI['info']} Kako učestvovati",
             value=(
                 "> Pročitaj uslove u objavi, klikni traženu reakciju ili dugme "
                 "i prati rok za prijavu."
@@ -2972,7 +2977,7 @@ async def info_postavi(interaction: discord.Interaction):
         return
 
     embed = discord.Embed(
-        title=f"💜 {interaction.guild.name} — informacije",
+        title=f"{CUSTOM_EMOJI['heart']} {interaction.guild.name} — informacije",
         description=(
             "> Klikni **Info** za pravila, **Opis • sve komande** za spisak komandi "
             "ili **GWS & Events** za giveawaye i evente.\n"
