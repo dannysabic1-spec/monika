@@ -7,6 +7,7 @@ import re
 import shutil
 import sys
 import traceback
+import unicodedata
 import uuid
 from discord.ext import commands
 from discord import app_commands
@@ -22,7 +23,7 @@ except ImportError:
 #              KONFIGURACIJA
 # ══════════════════════════════════════════════
 BOT_NAME   = "MONIKA BOT"
-VERSION    = "v4.6"
+VERSION    = "v4.8"
 TOKEN      = os.environ.get("DISCORD_TOKEN")
 BOT_PREFIX = "."
 
@@ -970,6 +971,7 @@ def is_known_bhs_word(word: str) -> bool:
             "grad", "igra", "more", "mjesec", "nada", "oblak", "pas",
             "prijatelj", "radost", "srce", "sunce", "sreća", "voda",
             "zima", "život", "ljubav", "škola", "čokolada",
+            "test", "sto", "stol", "stolica", "stvar", "staza",
         }
     try:
         # wordfreq nema pouzdanu oznaku za svaki B/H/S tekst, pa uzimamo
@@ -995,8 +997,11 @@ async def send_private_game_notice(
     now = asyncio.get_running_loop().time()
     guild_id = ctx.guild.id if ctx.guild else 0
     notice_key = (guild_id, ctx.author.id)
-    last_notice = GAME_ERROR_NOTICE_TIMES.get(notice_key, 0)
-    if now - last_notice < GAME_ERROR_NOTICE_COOLDOWN_SECONDS:
+    last_notice = GAME_ERROR_NOTICE_TIMES.get(notice_key)
+    if (
+        last_notice is not None
+        and now - last_notice < GAME_ERROR_NOTICE_COOLDOWN_SECONDS
+    ):
         return False
     GAME_ERROR_NOTICE_TIMES[notice_key] = now
     if len(GAME_ERROR_NOTICE_TIMES) > 5000:
@@ -1013,12 +1018,7 @@ async def send_private_game_notice(
         )
         return True
     except discord.Forbidden:
-        # DM može biti zatvoren. Reakcija je neutralna i ne otkriva tekst greške.
-        if ctx.message:
-            try:
-                await ctx.message.add_reaction("🔒")
-            except discord.HTTPException:
-                pass
+        # DM može biti zatvoren; ✅/❌ reakciju dodaje handler poteza.
         return False
     except discord.HTTPException as exc:
         print(
@@ -1030,6 +1030,99 @@ async def send_private_game_notice(
 # Ograniči privatne greške da pogrešan unos ne izazove DM spam.
 GAME_ERROR_NOTICE_TIMES = {}
 GAME_ERROR_NOTICE_COOLDOWN_SECONDS = 8
+GAME_INPUT_TIMES = {}
+GAME_INPUT_COOLDOWN_SECONDS = 0.75
+
+GAME_CHANNEL_NAME_ALIASES = {
+    "ljubav": ("ljubav", "love", "parovi"),
+    "pecanje": ("pecanje", "ribolov", "fishing"),
+    "ekonomija": ("ekonomija", "economija", "economy", "novac", "coins"),
+    "kuca": ("kuca", "stan", "house"),
+    "zabava": ("zabava", "fun", "games"),
+    "rangliste": ("rangliste", "ranglista", "leaderboard"),
+    "counting": ("counting", "brojanje", "brojevi"),
+    "toplo_hladno": ("toplo-hladno", "toplo", "hladno", "hotcold"),
+    "kaladont": ("kaladont", "rijeci", "words"),
+    "casino": ("casino", "kocka", "slot"),
+}
+
+def normalize_channel_name(value: str) -> str:
+    """Ukloni emoji-je, razmake i dijakritike radi prepoznavanja kanala."""
+    normalized = unicodedata.normalize("NFKD", str(value).casefold())
+    return "".join(char for char in normalized if char.isalnum())
+
+def channel_name_matches_type(channel, tip: str) -> bool:
+    aliases = GAME_CHANNEL_NAME_ALIASES.get(tip, ())
+    normalized_name = normalize_channel_name(getattr(channel, "name", ""))
+    return any(
+        normalize_channel_name(alias) in normalized_name
+        for alias in aliases
+    )
+
+def channel_is_for_type(channel, tip: str, kanali: dict) -> bool:
+    configured_channel_id = kanali.get(tip)
+    if configured_channel_id is not None:
+        try:
+            return int(configured_channel_id) == int(channel.id)
+        except (TypeError, ValueError):
+            return False
+    return channel_name_matches_type(channel, tip)
+
+async def add_game_result_reaction(ctx: commands.Context, correct: bool) -> None:
+    """Dodaj samo ✅/❌ na unos; detalj greške ostaje privatnom porukom."""
+    if not ctx.message:
+        return
+    try:
+        await ctx.message.add_reaction("✅" if correct else "❌")
+    except discord.HTTPException as exc:
+        print(
+            f"[IGRE] Reakcija nije dodana za poruku {ctx.message.id}: "
+            f"HTTP {getattr(exc, 'status', 'n/a')}."
+        )
+
+async def accept_game_input(
+    ctx: commands.Context,
+    *,
+    action: str = "move",
+) -> bool:
+    """Ograniči brzinu poteza jednog člana bez javnih spam-poruka."""
+    if not ctx.message:
+        return True
+    now = asyncio.get_running_loop().time()
+    key = (
+        ctx.guild.id if ctx.guild else 0,
+        ctx.channel.id,
+        ctx.author.id,
+        action,
+    )
+    previous_input = GAME_INPUT_TIMES.get(key)
+    if (
+        previous_input is not None
+        and now - previous_input < GAME_INPUT_COOLDOWN_SECONDS
+    ):
+        return False
+    GAME_INPUT_TIMES[key] = now
+    if len(GAME_INPUT_TIMES) > 10000:
+        cutoff = now - GAME_INPUT_COOLDOWN_SECONDS * 10
+        for old_key, seen_at in list(GAME_INPUT_TIMES.items()):
+            if seen_at < cutoff:
+                GAME_INPUT_TIMES.pop(old_key, None)
+    return True
+
+async def reject_game_input(ctx: commands.Context) -> None:
+    """Odbij nevažeći potez samo reakcijom; ne šalji poruku ili kaznu."""
+    if not await accept_game_input(ctx):
+        return
+    await add_game_result_reaction(ctx, correct=False)
+
+async def may_restart_active_game(ctx: commands.Context) -> bool:
+    """Samo vlasnik/admin može prekinuti aktivnu rundu i pokrenuti novu."""
+    if not ctx.guild:
+        return True
+    if ctx.author.id == ctx.guild.owner_id:
+        return True
+    permissions = getattr(ctx.author, "guild_permissions", None)
+    return bool(permissions and permissions.administrator)
 
 async def check_kanal(ctx: commands.Context, tip: str) -> bool:
     if not ctx.guild:
@@ -1037,17 +1130,22 @@ async def check_kanal(ctx: commands.Context, tip: str) -> bool:
     data   = load_data()
     kanali = get_kanali(data, ctx.guild.id)
     dozvola = kanali.get(tip)
-    if dozvola is None:
+    if channel_is_for_type(ctx.channel, tip, kanali):
         return True
-    if ctx.channel.id != dozvola:
+    if dozvola is not None:
         kanal_obj = ctx.guild.get_channel(dozvola)
         naziv     = kanal_obj.mention if kanal_obj else f"<#{dozvola}>"
-        await send_private_game_notice(
-            ctx,
-            f"Ova komanda je dostupna samo u {naziv}.",
+        error = f"Ova komanda je dostupna samo u {naziv}."
+    else:
+        aliases = GAME_CHANNEL_NAME_ALIASES.get(tip, ())
+        suggested = aliases[0] if aliases else tip
+        error = (
+            f"Ova komanda je dostupna u svom kanalu. Naziv kanala treba "
+            f"sadržati **{suggested}**, ili administrator može podesiti "
+            f"tačan kanal pomoću `/setkanal`."
         )
-        return False
-    return True
+    await send_private_game_notice(ctx, error)
+    return False
 
 PREFIX_COMMAND_CHANNEL_TYPES = {
     # Ljubavni sistem
@@ -1829,7 +1927,7 @@ class InfoView(discord.ui.View):
         embed.add_field(
             name=f"{CUSTOM_EMOJI['book']} Kaladont",
             value=(
-                "> Pokreni `.kaladont`, pa šalji riječi naizmjenično s drugim članovima.\n"
+                "> Pokreni `.kaladont`, pa šalji sljedeću ispravnu riječ direktno u kanal.\n"
                 "> Uspješan odgovor prikazuje člana kao oznaku i riječ VELIKIM SLOVIMA.\n"
                 "> Za cijeli spisak komandi klikni dugme **Opis • sve komande**."
             ),
@@ -2843,44 +2941,44 @@ async def on_message(message: discord.Message):
         configured_game_channels = {}
         if message.guild:
             configured_game_channels = get_kanali(load_data(), message.guild.id)
-        if (
-            configured_game_channels.get("toplo_hladno") == channel_id
+        if channel_is_for_type(
+            message.channel,
+            "toplo_hladno",
+            configured_game_channels,
         ):
-            if raw.isdigit():
+            if raw.isascii() and raw.isdigit():
                 await toplo_hladno.callback(ctx, int(raw))
             elif raw:
-                await send_private_game_notice(
-                    ctx,
-                    "Pošalji broj od **1 do 100** za igru Toplo-hladno.",
-                )
+                await reject_game_input(ctx)
             return
-        if (
-            configured_game_channels.get("counting") == channel_id
+        if channel_is_for_type(
+            message.channel,
+            "counting",
+            configured_game_channels,
         ):
-            if raw.isdigit():
+            if raw.isascii() and raw.isdigit():
                 await counting.callback(ctx, int(raw))
             elif raw:
-                await send_private_game_notice(
-                    ctx,
-                    "Brojanje prima samo sljedeći broj kao cifru.",
-                )
+                await reject_game_input(ctx)
             return
-        if (
-            configured_game_channels.get("kaladont") == channel_id
-            and raw
-        ):
+        if channel_is_for_type(
+            message.channel,
+            "kaladont",
+            configured_game_channels,
+        ) and raw:
             await kaladont.callback(ctx, raw)
             return
-        if configured_game_channels.get("casino") == channel_id:
+        if channel_is_for_type(
+            message.channel,
+            "casino",
+            configured_game_channels,
+        ):
             parts = raw.split()
             if len(parts) == 2 and parts[0].lower() in {"coin", "slot"} and parts[1].isdigit():
                 await casino.callback(ctx, parts[0], int(parts[1]))
                 return
             if raw:
-                await send_private_game_notice(
-                    ctx,
-                    "Za casino koristi `coin 50` ili `slot 50`.",
-                )
+                await reject_game_input(ctx)
                 return
         # Brojevi u Monikinom kanalu prvo pripadaju njenom izazovu.
         if message.guild:
@@ -3170,17 +3268,21 @@ async def on_member_unban(guild: discord.Guild, user: discord.User):
 
 @bot.event
 async def on_command_error(ctx: commands.Context, error):
+    if isinstance(error, commands.CommandNotFound) and ctx.guild:
+        channels = get_kanali(load_data(), ctx.guild.id)
+        game_types = ("counting", "toplo_hladno", "kaladont", "casino")
+        for game_type in game_types:
+            if channel_is_for_type(ctx.channel, game_type, channels):
+                await reject_game_input(ctx)
+                return
+
     if ctx.command and ctx.command.name in {
         "casino",
         "counting",
         "toplo-hladno",
         "kaladont",
     }:
-        await send_private_game_notice(
-            ctx,
-            "Unos za ovu igru nije ispravan. Detalje komande možeš provjeriti "
-            "pomoću `.pomoc`; greška nije objavljena u kanalu.",
-        )
+        await reject_game_input(ctx)
         return
 
     if isinstance(error, commands.MissingRequiredArgument):
@@ -6805,9 +6907,10 @@ def pomoc_pages():
                 "> **Ribolov**\n"
                 "> `.pecanje` · `.ribnjak [@Korisnik]` · `.prodaj` · `.ribar`\n\n"
                 "> **Mini-igre**\n"
-                "> `.counting 1` — Pokreni brojanje; zatim šalji samo brojeve\n"
-                "> `.toplo-hladno` — Pokreni rundu; zatim šalji samo brojeve\n"
-                "> `.kaladont` — Pokreni rundu; zatim šalji riječi bez prefiksa\n"
+                "> `.counting 1` — zatim šalji samo sljedeći broj\n"
+                "> `.toplo-hladno` — zatim šalji samo brojeve od 1 do 100\n"
+                "> `.kaladont` — zatim šalji riječi direktno, bez komande\n"
+                "> ✅/❌ označava potez; detalji greške idu privatno autoru\n"
                 "> `.pijte` · `.film` · `.istina` · `.izazov`\n"
                 "> `.ljubavni-test @Korisnik` · `.compatibility @Korisnik`\n\n"
                 "> **Rang-liste**\n"
@@ -7211,18 +7314,18 @@ async def casino(ctx: commands.Context, igra: str = None, iznos: int = None):
         return
     igra = igra.lower()
     if igra not in {"coin", "slot"}:
-        await send_private_game_notice(ctx, "Izaberi `coin` ili `slot` za casino.")
+        await reject_game_input(ctx)
         return
     if iznos is None or iznos < 10:
-        await send_private_game_notice(
-            ctx,
-            "Ulog mora biti najmanje **10** novčića. Primjer: `.casino coin 50`.",
-        )
+        await reject_game_input(ctx)
+        return
+    if not await accept_game_input(ctx):
         return
     data = load_data()
     wallet = get_ekonomija(data, ctx.author.id)
     novac = wallet.get("novac", 0)
     if iznos > novac:
+        await add_game_result_reaction(ctx, correct=False)
         await send_private_game_notice(
             ctx,
             f"Nemaš dovoljno novca za taj ulog. Tvoje stanje je **{novac:,}** novčića.",
@@ -7241,6 +7344,7 @@ async def casino(ctx: commands.Context, igra: str = None, iznos: int = None):
     wallet["novac"] += dobitak
     save_data(data)
     neto = dobitak - iznos
+    await add_game_result_reaction(ctx, correct=bool(dobitak))
     await send_game_embed(
         ctx,
         game_embed(
@@ -7289,6 +7393,8 @@ async def counting(ctx: commands.Context, broj: int = None):
             "counting",
         )
         return
+    if not await accept_game_input(ctx):
+        return
     async with lock:
         # Učitaj ponovo unutar brave: dvije poruke u isto vrijeme ne mogu
         # prihvatiti isti broj niti prepisati stanje jedna drugoj.
@@ -7303,7 +7409,6 @@ async def counting(ctx: commands.Context, broj: int = None):
         if not isinstance(state, dict):
             state = counting_data[game_key] = {"next": 1, "last_user_id": None}
         expected = max(1, int(state.get("next", 1) or 1))
-        last_user_id = state.get("last_user_id")
 
         error_message = None
         if broj != expected:
@@ -7312,12 +7417,6 @@ async def counting(ctx: commands.Context, broj: int = None):
             error_message = (
                 f"Pogrešan broj. Očekivao se **{expected}**; brojanje je "
                 "vraćeno na **1**."
-            )
-        elif expected > 1 and last_user_id == ctx.author.id:
-            state.update({"next": 1, "last_user_id": None})
-            save_data(data)
-            error_message = (
-                "Ne možeš brojati dva puta zaredom; brojanje je vraćeno na **1**."
             )
         else:
             state.update({"next": expected + 1, "last_user_id": ctx.author.id})
@@ -7331,13 +7430,10 @@ async def counting(ctx: commands.Context, broj: int = None):
                 author_mention=ctx.author.mention,
             )
     if error_message:
-        embed = discord.Embed(
-            description="> 🔄 Brojanje se nastavlja od **1**.",
-            color=_LP,
-        )
+        await add_game_result_reaction(ctx, correct=False)
+        return
+    await add_game_result_reaction(ctx, correct=True)
     await send_counting_reply(ctx, embed)
-    if error_message:
-        await send_private_game_notice(ctx, error_message)
 
 @bot.command(name="toplo-hladno")
 async def toplo_hladno(ctx: commands.Context, pogodak: int = None):
@@ -7346,47 +7442,70 @@ async def toplo_hladno(ctx: commands.Context, pogodak: int = None):
     channel_id = ctx.channel.id
     lock = HOT_COLD_LOCKS.setdefault(channel_id, asyncio.Lock())
     if pogodak is None:
+        if not await accept_game_input(ctx, action="start"):
+            return
+        active_game = False
         async with lock:
-            HOT_COLD_GAMES[channel_id] = random.randint(1, 100)
+            active_game = channel_id in HOT_COLD_GAMES
+            if active_game and not await may_restart_active_game(ctx):
+                error_message = (
+                    "Runda je već aktivna. Novu rundu može pokrenuti vlasnik/"
+                    "administrator ili član nakon završetka trenutne."
+                )
+            else:
+                error_message = None
+            if error_message:
+                target = None
+            else:
+                target = random.randint(1, 100)
+                HOT_COLD_GAMES[channel_id] = target
+        if error_message:
+            await add_game_result_reaction(ctx, correct=False)
+            return
+        await add_game_result_reaction(ctx, correct=True)
         await send_game_embed(
             ctx,
             game_embed(
                 "🌡️ Toplo-hladno",
                 [
                     "> 🎯 Zamislio/la sam broj od **1 do 100**.",
-                    "> Pošalji samo broj u kanalu ili koristi `.toplo-hladno <broj>`.",
+                    "> Šalji samo broj direktno u kanal — bez ponavljanja komande.",
+                    "> Aktivnu rundu može ponovo pokrenuti samo vlasnik/"
+                    "administrator; nakon završetka može je pokrenuti bilo ko.",
                 ],
                 "Nova runda je počela",
             ),
             "toplo_hladno",
         )
         return
+    if not await accept_game_input(ctx):
+        return
     if not 1 <= pogodak <= 100:
-        await send_private_game_notice(
-            ctx,
-            "Broj za Toplo-hladno mora biti između **1 i 100**.",
-        )
+        await add_game_result_reaction(ctx, correct=False)
         return
     async with lock:
         target = HOT_COLD_GAMES.get(channel_id)
         if target is None:
             error_message = (
-                "Nema aktivne runde. Pokreni je prvo komandom `.toplo-hladno`."
+                "Nema aktivne runde. Pokreni je komandom `.toplo-hladno` u kanalu igre."
             )
             result_embed = None
+            correct_guess = False
         elif pogodak == target:
             HOT_COLD_GAMES.pop(channel_id, None)
             error_message = None
+            correct_guess = True
             result_embed = game_embed(
                 "🌡️ Toplo-hladno",
                 [
                     f"> 🎉 Tačan pogodak: **{target}**!",
-                    "> Nova runda počinje sa `.toplo-hladno`.",
+                    "> Runda je završena; sada može početi nova.",
                 ],
                 "Čestitamo!",
             )
         else:
             error_message = None
+            correct_guess = False
             razlika = abs(target - pogodak)
             temperatura = (
                 "🔥 VRELO" if razlika <= 5
@@ -7404,8 +7523,9 @@ async def toplo_hladno(ctx: commands.Context, pogodak: int = None):
                 "Runda je aktivna",
             )
     if error_message:
-        await send_private_game_notice(ctx, error_message)
+        await add_game_result_reaction(ctx, correct=False)
         return
+    await add_game_result_reaction(ctx, correct=correct_guess)
     await send_game_embed(
         ctx,
         result_embed,
@@ -7420,84 +7540,105 @@ async def kaladont(ctx: commands.Context, rijec: str = None):
     lock = KALADONT_LOCKS.setdefault(channel_id, asyncio.Lock())
     error_message = None
     result_embed = None
-    async with lock:
-        game = KALADONT_GAMES.get(channel_id)
-        if not rijec:
-            KALADONT_GAMES[channel_id] = {
-                "last": None,
-                "last_author_id": None,
-                "used": set(),
-            }
-            result_embed = game_embed(
-                "🔤 Kaladont",
-                [
-                    "> Nova runda je počela!",
-                    "> Prvi igrač sada šalje običnu riječ, bez `.kaladont`.",
-                    "> Svaka naredna riječ mora početi sa posljednja dva slova prethodne.",
-                    "> Isti igrač ne može igrati dva puta zaredom.",
-                ],
-                "Ako riječ završava na „ka“, igrač gubi",
-            )
-        else:
-            rijec = rijec.lower().strip()
-            direct_message = bool(
-                ctx.message
-                and not ctx.message.content.startswith(BOT_PREFIX)
-            )
-            if game is None and direct_message:
+
+    if not rijec:
+        if not await accept_game_input(ctx, action="start"):
+            return
+        async with lock:
+            active_game = KALADONT_GAMES.get(channel_id) is not None
+            if active_game and not await may_restart_active_game(ctx):
                 error_message = (
-                    "Nema aktivne runde. Pokreni je prvo komandom `.kaladont`."
-                )
-            elif len(rijec) < 2 or not rijec.isalpha():
-                error_message = (
-                    "Riječ mora sadržati samo slova i imati najmanje 2 slova."
-                )
-            elif not is_known_bhs_word(rijec):
-                error_message = (
-                    f"Riječ **{rijec.upper()}** nije prepoznata kao B/H/S riječ. "
-                    "Unesi stvarnu riječ."
+                    "Kaladont runda je već aktivna. Vlasnik/administrator može "
+                    "je resetovati; novu rundu može pokrenuti bilo ko nakon kraja."
                 )
             else:
-                if game is None:
-                    game = {"last": None, "last_author_id": None, "used": set()}
-                    KALADONT_GAMES[channel_id] = game
-                game.setdefault("used", set())
-                if game.get("last") and game.get("last_author_id") == ctx.author.id:
-                    error_message = (
-                        "Sačekaj da drugi član pošalje riječ; isti igrač ne može "
-                        "igrati dva puta zaredom."
-                    )
-                elif rijec in game["used"]:
-                    error_message = "Ta riječ je već iskorištena. Probaj drugu."
-                elif game["last"] and not rijec.startswith(game["last"][-2:]):
-                    error_message = (
-                        f"Riječ mora početi sa **{game['last'][-2:].upper()}**."
-                    )
+                error_message = None
+                KALADONT_GAMES[channel_id] = {
+                    "last": None,
+                    "last_author_id": None,
+                    "used": set(),
+                }
+        if error_message:
+            await add_game_result_reaction(ctx, correct=False)
+            return
+        await add_game_result_reaction(ctx, correct=True)
+        result_embed = game_embed(
+            "🔤 Kaladont",
+            [
+                "> Nova runda je počela!",
+                "> Prvi igrač sada šalje običnu riječ, bez `.kaladont`.",
+                "> Svaka sljedeća riječ mora početi sa posljednja dva slova prethodne.",
+                "> Riječi se provjeravaju; pogrešan potez ne šalje javni tekst.",
+            ],
+            "Vlasnik/admin može resetovati aktivnu rundu",
+        )
+        await send_kaladont_embed(ctx, result_embed)
+        return
+
+    if not await accept_game_input(ctx):
+        return
+    async with lock:
+        game = KALADONT_GAMES.get(channel_id)
+        rijec = rijec.lower().strip()
+        direct_message = bool(
+            ctx.message
+            and not ctx.message.content.startswith(BOT_PREFIX)
+        )
+        if game is None and direct_message:
+            error_message = (
+                "Nema aktivne runde. Pokreni je komandom `.kaladont` u kanalu igre."
+            )
+        elif len(rijec) < 2 or not rijec.isalpha():
+            error_message = (
+                "Riječ mora sadržati samo slova i imati najmanje 2 slova."
+            )
+        elif not is_known_bhs_word(rijec):
+            error_message = (
+                f"Riječ **{rijec.upper()}** nije prepoznata kao B/H/S riječ. "
+                "Unesi stvarnu riječ."
+            )
+        else:
+            if game is None:
+                game = {"last": None, "last_author_id": None, "used": set()}
+                KALADONT_GAMES[channel_id] = game
+            game.setdefault("used", set())
+            if rijec in game["used"]:
+                error_message = "Ta riječ je već iskorištena. Probaj drugu."
+            elif game["last"] and not rijec.startswith(game["last"][-2:]):
+                error_message = (
+                    f"Riječ mora početi sa **{game['last'][-2:].upper()}**."
+                )
+            else:
+                game["used"].add(rijec)
+                game["last"] = rijec
+                game["last_author_id"] = ctx.author.id
+                if rijec.endswith("ka"):
+                    KALADONT_GAMES.pop(channel_id, None)
+                    poruka = [
+                        f"> 💥 {ctx.author.mention} je poslao/la **{rijec.upper()}**.",
+                        "> Riječ se završava na „KA“ — runda je završena!",
+                    ]
+                    footer = "Runda je gotova; može početi nova"
                 else:
-                    game["used"].add(rijec)
-                    game["last"] = rijec
-                    game["last_author_id"] = ctx.author.id
-                    if rijec.endswith("ka"):
-                        KALADONT_GAMES.pop(channel_id, None)
-                        poruka = [
-                            f"> 💥 {ctx.author.mention} je poslao/la **{rijec.upper()}**.",
-                            "> Riječ se završava na „KA“ — runda je završena!",
-                        ]
-                    else:
-                        poruka = [
-                            f"> ✅ {ctx.author.mention}: **{rijec.upper()}**",
-                            f"> Sljedeća riječ počinje sa **{rijec[-2:].upper()}**.",
-                        ]
-                    result_embed = game_embed(
-                        "🔤 Kaladont",
-                        poruka,
-                        "Nastavi riječima direktno u kanalu • nova runda: .kaladont",
-                    )
+                    poruka = [
+                        f"> ✅ {ctx.author.mention}: **{rijec.upper()}**",
+                        f"> Sljedeća riječ počinje sa **{rijec[-2:].upper()}**.",
+                    ]
+                    footer = "Sljedeća riječ direktno u kanal — bez komande"
+                result_embed = game_embed(
+                    "🔤 Kaladont",
+                    poruka,
+                    footer,
+                )
 
     if error_message:
-        await send_private_game_notice(ctx, error_message)
+        await add_game_result_reaction(ctx, correct=False)
         return
     if result_embed:
+        await add_game_result_reaction(
+            ctx,
+            correct=not rijec.endswith("ka"),
+        )
         await send_kaladont_embed(ctx, result_embed)
 
 # ══════════════════════════════════════════════
@@ -7921,9 +8062,9 @@ async def opis_slash(interaction: discord.Interaction):
             title="• MONIKA BOT — Mini-igre 6/7",
             description=(
                 "> **Igre za kanal i članove**\n"
-                "> `.counting 1` — Započni brojanje; zatim šalji samo sljedeći broj.\n"
-                "> `.toplo-hladno` — Pokreni rundu; zatim šalji brojeve od 1 do 100.\n"
-                "> `.kaladont` — Pokreni rundu; zatim šalji riječi direktno u kanal.\n"
+                "> `.counting 1` — zatim šalji samo sljedeći broj.\n"
+                "> `.toplo-hladno` — zatim šalji brojeve od 1 do 100; vlasnik/admin može resetovati aktivnu rundu.\n"
+                "> `.kaladont` — zatim šalji riječi direktno u kanal, bez komande.\n"
                 "> `.pijte` — Pokreni zabavnu poruku za društvo.\n"
                 "> `.film` — Pokreni izbor filma.\n"
                 "> `.istina` — Dobij pitanje istine.\n"
@@ -7932,8 +8073,8 @@ async def opis_slash(interaction: discord.Interaction):
                 "> `.compatibility @Korisnik` — Izračunaj kompatibilnost.\n"
                 ">\n"
                 "> Stanje svake igre je odvojeno po kanalu. U kanalima čiji naziv "
-                "sadrži `counting`, `toplo-hladno`, `kaladont` ili `casino` mogući "
-                "su i unosi bez prefixa, kada je runda već pokrenuta."
+                "sadrži naziv igre ili je postavljen preko `/setkanal`, mogući "
+                "su unosi bez prefixa nakon pokretanja runde."
             ),
             color=_LP,
         ),
@@ -8004,9 +8145,9 @@ async def komande_slash(interaction: discord.Interaction):
             "> ",
             "> Mini-igre:",
             "> `.casino [coin|slot] <ulog>`",
-            "> `.counting 1` — nakon toga šalji samo broj",
-            "> `.toplo-hladno` — nakon toga šalji samo broj",
-            "> `.kaladont` — nakon toga šalji samo riječ",
+            "> `.counting 1` — zatim šalji samo sljedeći broj",
+            "> `.toplo-hladno` — zatim šalji samo broj",
+            "> `.kaladont` — zatim šalji samo riječ",
             "> `.ekonomija`",
             "> ",
             "> Ljubav: `.veza` · `.profil` · `.brak` · `.prsten` · `.svadba`",
@@ -8027,10 +8168,10 @@ async def igre_slash(interaction: discord.Interaction):
         "🎮 Mini-igre",
         [
             "> Casino: koristi `.casino coin 50` ili `.casino slot 50`.",
-            "> Brojanje: `.counting 1`, pa samo brojevi u podešenom kanalu.",
-            "> Toplo-hladno: `.toplo-hladno`, pa samo brojevi u podešenom kanalu.",
-            "> Kaladont: `.kaladont`, pa samo riječi u podešenom kanalu.",
-            "> Greške se šalju privatno autoru; valjani potezi ostaju u kanalu igre.",
+            "> Brojanje: `.counting 1`, pa upisuj samo sljedeći broj.",
+            "> Toplo-hladno: `.toplo-hladno`, pa upisuj samo brojeve.",
+            "> Kaladont: `.kaladont`, pa upisuj samo sljedeću riječ.",
+            "> ✅/❌ označava potez; greške idu privatno, bez javnog teksta.",
         ],
         "Prefix svih igara: .",
     )

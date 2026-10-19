@@ -1,4 +1,4 @@
-# MONIKA BOT Discord Bot — v4.6
+# MONIKA BOT Discord Bot — v4.8
 
 Ovo je kompletan Discord bot sa ljubavnim sistemom, virtuelnom ekonomijom,
 kućama za parove, ribolovom, rang-listama, welcome panelom i Info/GWS & Events
@@ -288,8 +288,9 @@ Svi embed-i koriste sivo-crnu dark boju (`#2B2D31`) i kompaktan prikaz bez `>` o
 /igre
 ```
 
-Komande se mogu ograničiti na svoje kanale. Podesi svaki tip jednom kao
-administrator; primjer za igre:
+Prefix komande koriste odvojene kanale po kategoriji. Ako je kanal već nazvan
+po kategoriji, npr. `#kaladont` ili `#counting`, bot ga prepoznaje automatski.
+Za kanale drugačijih naziva administrator može eksplicitno podesiti tip:
 
 ```text
 /setkanal ljubav #ljubav
@@ -304,17 +305,19 @@ administrator; primjer za igre:
 /setkanal casino #casino
 ```
 
-Ljubavne, ribolovne, ekonomske, kućne, zabavne i rang-lista prefix komande
-zatim rade samo u svom podešenom kanalu. Administrativne slash komande ostaju
-dostupne administratorima i prikazuju privatne potvrde.
+Ljubavne, ribolovne, ekonomske, kućne, zabavne, rang-lista i igračke prefix
+komande rade samo u svom odgovarajućem kanalu. Administrativne slash komande
+ostaju dostupne administratorima i prikazuju privatne potvrde.
 
-Kad je kanal igre podešen, igra prima obične brojeve/riječi samo u tom kanalu.
-U Kaladontu pokreni `.kaladont` jednom, pa igrači šalju riječi direktno
-u `#kaladont` — bez ponavljanja komande. Za Toplo-hladno pokreni
-`.toplo-hladno`, pa šalji brojeve; za counting pokreni `.counting 1`, pa
-svaki sljedeći broj pošalji kao običnu poruku. Tačni potezi i javni rezultat
-ostaju vidljivi u kanalu igre; greške i obavijesti o pogrešnom kanalu šalju se
-privatno autoru, uz neutralnu reakciju samo ako su mu DM poruke zatvorene.
+U `#kaladont` pokreni `.kaladont` jednom, pa svaki sljedeći igrač šalje samo
+riječ koja odgovara posljednja dva slova — bez ponavljanja komande. Za
+Toplo-hladno pokreni `.toplo-hladno`, pa upisuj samo brojeve. Za counting
+pokreni `.counting 1`, zatim upiši samo `2`, pa `3` i dalje.
+Tačan potez dobija ✅, pogrešan ❌. Pogrešan potez ne šalje tekst ni DM.
+Unosi su ograničeni na jedan potez svakih 0,75 sekundi po članu i kanalu; višak unosa se
+preskače bez javne poruke. Aktivnu rundu Toplo-hladno/Kaladonta može resetovati
+samo vlasnik servera ili administrator; nakon završetka bilo ko može započeti
+novu rundu. Za reakcije botu treba dozvola **Add Reactions**.
 
 `/setlogin` više ne zaključava komande. Postavi kanal za evidencijske embedove
 dolasaka članova i ban/unban događaja. Nakon ažuriranja pokreni `/setlogin`
@@ -360,8 +363,9 @@ sinhronizovanih slash komandi i njihova imena. `/sync` ručno osvježava slash
 komande bez restartovanja procesa; koristi ga vlasnik bota ili administrator.
 Ako se log ne poklapa s ovim paketom, vjerovatno se pokreće stara kopija bota.
 
-Mini-igre se više ne prepoznaju automatski po nazivu kanala. Skraćeni unos
-bez prefiksa radi samo u kanalu koji je administrator podesio za tu igru.
+Mini-igre se prepoznaju po nazivu kanala (npr. `#kaladont`, `#counting`) ili
+po ID-u kanala podešenom preko `/setkanal`. Skraćeni unos bez prefiksa radi
+samo u tako prepoznatom kanalu.
 
 Komanda `/opis` je dostupna samo vlasniku bota. Objavljuje uputstvo za članove
 u sedam povezanih embed poruka: način rada, članske prefix i slash komande,
@@ -486,19 +490,19 @@ Prefix svih komandi je tačka (`.`):
 
 - `.ekonomija` — pregled gotovine, banke i ekonomskih komandi
 - `.casino` — `coin` ili `slot`, minimalni ulog je 10 novčića
-- `.counting 1` — pokreni brojanje, zatim šalji samo sljedeći broj
+- `.counting 1` — pokreni brojanje, zatim šalji samo sljedeći broj (`2`, `3`...)
 - `.toplo-hladno` — pokreni rundu, zatim šalji brojeve od 1 do 100
 - `.kaladont` — pokreni rundu, zatim šalji obične riječi bez prefiksa
 
 Stanje svake igre je odvojeno po Discord kanalu. Counting prikazuje prihvaćeni
-broj, sljedeći broj i tagovanog člana u tamnom embed-u, kao odgovor na poruku s brojem.
-Ne možeš brojati dva broja zaredom; pogrešan broj ili isti član resetuju rundu
-na 1. Broj i posljednji član čuvaju se u `ljubav_data.json` i preživljavaju
-restart. Odgovori igara prikazuju odgovarajući stiker i emoji oznaku.
+broj i sljedeći broj kao reply embed. Svaki član može nastaviti brojanje ako
+upiše očekivani broj; pogrešan broj vraća brojač na 1 i dobija samo ❌.
+Broj se čuva u `ljubav_data.json` i preživljava restart.
 
-Kaladont odgovara direktno na svaku poruku u svom kanalu, provjerava riječ,
-taguje člana i ispisuje riječi velikim slovima. Stikeri iz priloženog lista
-su izrezani i ugrađeni u odgovore igara; welcome embedovi nisu mijenjani.
+Kaladont prihvata riječ direktno u svom kanalu, provjerava slova, rječnik,
+ponavljanje i traženi nastavak. Prihvata se prvi ispravan potez bez obzira ko
+ga je poslao; pogrešna riječ ne šalje javni tekst. Odgovori u igrama imaju
+odgovarajući stiker i reakciju na originalnu poruku.
 
 U kanalima podešenim preko `/setkanal` za `counting`, `toplo-hladno`,
 `kaladont` ili `casino` može se slati unos bez prefixa:
@@ -508,9 +512,9 @@ U kanalima podešenim preko `/setkanal` za `counting`, `toplo-hladno`,
 - `kaladont` — prvo pokreni `.kaladont`, zatim šalji riječi direktno u kanal
 - `casino` — pošalji `coin 50` ili `slot 50`
 
-Pogrešni unosi i poruke u pogrešnom kanalu ne objavljuju se javno: bot šalje
-objašnjenje privatno pošiljaocu. Tačni potezi i javna stanja igre ostaju u
-kanalu da svi igrači mogu pratiti red.
+Pogrešan potez dobija samo ❌ na originalnoj poruci — bot ne objavljuje grešku,
+ne šalje DM i ne kažnjava člana. Pogrešan kanal dobija privatno objašnjenje.
+Tačni potezi i javna stanja igre ostaju u kanalu da igrači mogu pratiti rundu.
 
 Slash komande `/komande` i `/igre` se automatski registruju nakon pokretanja
 bota i prikazuju pregled prefix komandi i mini-igara.
@@ -641,8 +645,10 @@ Provjereno:
 - `/setreport`, `/setpomoc` i `/setlogin` vidljive su bot-vlasniku i server administratorima
 - pri pokretanju se ispisuje stvarni rezultat slash komandi sinhronizovanih sa Discordom
 - interaktivna dugmad koriste Discord custom emoji-je, a panel komande ažuriraju postojeću objavu umjesto da je dupliraju
-- counting stanje se čuva trajno, a tačan unos se vraća kao reply embed
-- greške mini-igara i poruke o pogrešnom kanalu šalju se privatno autoru
+- counting stanje se čuva trajno; ispravni potezi dobijaju ✅, a pogrešni ❌
+- pogrešni potezi dobijaju samo ❌; pogrešan kanal se objašnjava privatno
+- direktan unos radi u kanalima prepoznatljivog naziva i bez ručnog `/setkanal`
+- limit po članu/kanalu prigušuje spam bez javnog flooda ili automatskog bana
 - `/poruka` objavljuje jednu pozivnicu u kanalu uz cooldown; ne šalje masovne DM-ove
 - Kaladont mijenja dvije priložene slike naizmjenično; Info panel ima dugme za sve komande
 - `/setlogin` postavlja kanal za logove dolazaka, banova i unbanova; više ne ograničava komande
@@ -657,9 +663,9 @@ knjiže u oba profila. To uključuje vezu, brak, zakletvu, svadbu, obnovu
 zavjeta, spavanje, srce, zagrljaj, poljubac, ples, poklone, film, istinu,
 izazov i testove kompatibilnosti.
 
-Kaladont sada provjerava redoslijed igrača, pa isti član ne može odigrati dvije
-riječi zaredom, a unos mora postojati u B/H/S rječniku. Podaci se čuvaju
-atomarno kako prekid procesa ne bi oštetio postojeći profil.
+Kaladont prihvata svaki ispravan sljedeći potez, čak i od istog člana, i provjerava
+da riječ postoji u B/H/S rječniku. Aktivnu rundu ne može resetovati običan član.
+Podaci se čuvaju atomarno kako prekid procesa ne bi oštetio postojeći profil.
 
 Welcome, Info, Staff, Ticket, Report, Giveaway i pomoć dugmad koriste
 Discord custom emoji-je. Ponovno postavljanje panela u istom kanalu ažurira
