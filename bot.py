@@ -1091,9 +1091,15 @@ def channel_is_for_type(channel, tip: str, kanali: dict) -> bool:
     configured_channel_id = kanali.get(tip)
     if configured_channel_id is not None:
         try:
-            return int(configured_channel_id) == int(channel.id)
+            if int(configured_channel_id) == int(channel.id):
+                return True
         except (TypeError, ValueError):
-            return False
+            pass
+        # Ljubavni komandi je dozvoljen i standardni #brak-veza kanal,
+        # čak i kad postoji stara, pogrešno podešena ID vrijednost.
+        if tip == "ljubav" and channel_name_matches_type(channel, tip):
+            return True
+        return False
     return channel_name_matches_type(channel, tip)
 
 async def add_game_result_reaction(ctx: commands.Context, correct: bool) -> None:
@@ -1207,7 +1213,7 @@ PREFIX_COMMAND_CHANNEL_TYPES = {
         name: "zabava"
         for name in (
             "pijte", "film", "istina", "izazov", "ljubavni-test",
-            "compatibility", "giveaways", "ship", "iq",
+            "compatibility", "giveaways",
         )
     },
     **{
@@ -3328,6 +3334,11 @@ async def on_member_unban(guild: discord.Guild, user: discord.User):
 
 @bot.event
 async def on_command_error(ctx: commands.Context, error):
+    # Kanalna provjera je već poslala korisniku privatno objašnjenje.
+    # Ne prikazuj je kao javnu grešku komande.
+    if isinstance(error, commands.CheckFailure):
+        return
+
     # Obična riječ ili kratak tekst koji počinje tačkom nije razlog za opomenu.
     # Nepostojeće komande, npr. ".xo", zato ostaju bez odgovora; pravi unosi
     # u igre obrađuju se odvojeno u on_message.
@@ -5969,8 +5980,6 @@ async def profil(ctx: commands.Context, korisnik: discord.Member = None):
 @bot.command(name="ship")
 async def ship(ctx: commands.Context, korisnik: discord.Member):
     """Zabavni, stabilni procenat hemije za dva člana."""
-    if not await check_kanal(ctx, "zabava"):
-        return
     if korisnik.id == ctx.author.id:
         await ctx.send(embed=discord.Embed(
             description=f"> {CUSTOM_EMOJI['info']} Označi drugu osobu: `.ship @Korisnik`.",
@@ -6008,8 +6017,6 @@ async def ship(ctx: commands.Context, korisnik: discord.Member):
 @bot.command(name="iq")
 async def iq(ctx: commands.Context, korisnik: discord.Member = None):
     """Prikaži šaljiv, dnevno stabilan IQ rezultat; nije pravi test."""
-    if not await check_kanal(ctx, "zabava"):
-        return
     target = korisnik or ctx.author
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     seed = f"iq:{ctx.guild.id if ctx.guild else 0}:{target.id}:{day}"
@@ -6055,7 +6062,8 @@ async def opis(ctx: commands.Context):
             "posljednja dva slova prethodne riječi. Riječ koja se završi na "
             "**ka** završava rundu.\n"
             ">\n"
-            f"> **Ship** — `.ship @Korisnik`; **IQ** — `.iq [@Korisnik]`.\n"
+            f"> **Ship** — `.ship @Korisnik`; **IQ** — `.iq [@Korisnik]` "
+            "(rade u bilo kojem kanalu).\n"
             "> Igre rade u kanalima navedenim iznad. Ako koristiš drugačije "
             "nazive, administrator ih može povezati komandom `/setkanal`."
         ),

@@ -540,7 +540,8 @@ prepoznaje kanale čiji nazivi sadrže `casino`, `counting`, `toplo-hladno` ili
 
 `.ship` prikazuje zabavni procenat za označeni par; rezultat je stabilan za isti
 par. `.iq` daje šaljiv dnevni rezultat i nije pravi IQ test. `.opis` prikazuje
-uputstva za igre i njihove kanale. `.obrisi 100` briše do 100 poruka i zahtijeva
+uputstva za igre i njihove kanale. `.ship` i `.iq` rade u bilo kojem kanalu.
+`.obrisi 100` briše do 100 poruka i zahtijeva
 dozvolu **Manage Messages** za člana i bota. Nepostojeća komanda poput `.xo`
 ne izaziva opomenu.
 
