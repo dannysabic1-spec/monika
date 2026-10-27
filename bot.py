@@ -1191,7 +1191,7 @@ PREFIX_COMMAND_CHANNEL_TYPES = {
             "cvijece", "cokolada", "ruza", "ogrlica", "sat", "parfem",
             "auto", "jahte", "ljubomora", "djeca", "beba", "izlet",
             "vecera", "putovanje", "album", "datum", "godisnjica", "razina",
-            "statistika", "profil", "razvod",
+            "statistika", "profil", "razvod", "ship", "iq",
         )
     },
     # Odvojeni kanali za kuću, ekonomiju, zabavu i rang-liste
@@ -6045,6 +6045,7 @@ async def opis(ctx: commands.Context):
         channel_id = channels.get(tip)
         return f"<#{channel_id}>" if channel_id else f"#{default_name}"
 
+    love_channel = game_channel("ljubav", "brak-veza")
     embed = discord.Embed(
         title=f"{CUSTOM_EMOJI['book']} Uputstvo za mini-igre",
         description=(
@@ -6062,8 +6063,8 @@ async def opis(ctx: commands.Context):
             "posljednja dva slova prethodne riječi. Riječ koja se završi na "
             "**ka** završava rundu.\n"
             ">\n"
-            f"> **Ship** — `.ship @Korisnik`; **IQ** — `.iq [@Korisnik]` "
-            "(rade u bilo kojem kanalu).\n"
+            f"> **Ljubavne komande** — {love_channel}\n"
+            "> `.ship @Korisnik` i `.iq [@Korisnik]` koriste se u ljubavnom kanalu.\n"
             "> Igre rade u kanalima navedenim iznad. Ako koristiš drugačije "
             "nazive, administrator ih može povezati komandom `/setkanal`."
         ),
@@ -7400,16 +7401,11 @@ HOT_COLD_GAMES = {}
 HOT_COLD_LOCKS = {}
 PROCESSED_GAME_MESSAGE_IDS = set()
 KALADONT_STICKER_FILES = (
-    "game_sticker_kaladont.png",
-    "kaladont_sticker_1.jpg",
     "kaladont_sticker_2.jpg",
 )
 GAME_STICKER_FILES = {
-    "counting": ("game_sticker_counting.png", "game_sticker_trophy.png"),
-    "toplo_hladno": (
-        "game_sticker_toplo_hladno.png",
-        "game_sticker_kaladont.png",
-    ),
+    "counting": ("game_sticker_counting.png",),
+    "toplo_hladno": ("game_sticker_toplo_hladno.png",),
     "kaladont": KALADONT_STICKER_FILES,
     "casino": ("game_sticker_casino.png", "game_sticker_trophy.png"),
 }

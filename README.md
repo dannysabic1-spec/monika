@@ -18,6 +18,10 @@ se automatski dopunjavaju ako su sačuvani u starijem formatu.
 
 Komanda `.opis` pokazuje kako se koriste mini-igre i u kojim kanalima rade.
 Nepostojeće komande (npr. `.xo`) ne šalju opomenu.
+Komande `.ship` i `.iq` pripadaju ljubavnom sistemu i rade samo u kanalu
+ljubavi (`#brak-veza` ili kanalu koji je administrator podesio preko
+`/setkanal`). Kaladont uvijek prikazuje WORD sliku, Counting sliku 1–4,
+a Toplo-hladno THTH sliku.
 
 Komande za podešavanje koriste slash `/`, a obične članske komande prefix `.`.
 Slike greške iz razgovora nisu potrebne za rad bota i nisu u ovom ZIP-u.
