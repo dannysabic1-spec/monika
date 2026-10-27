@@ -1,8 +1,9 @@
-# MONIKA BOT Discord Bot — v4.8
+# MONIKA BOT Discord Bot — v4.9
 
 Ovo je kompletan Discord bot sa ljubavnim sistemom, virtuelnom ekonomijom,
 kućama za parove, ribolovom, rang-listama, welcome panelom i Info/GWS & Events
-panelom.
+panelom. Dodane su komande `.ship`, `.iq`, `.opis` i `.obrisi 100`; profili
+se automatski dopunjavaju ako su sačuvani u starijem formatu.
 
 ## Brzi početak na Replitu
 
@@ -14,6 +15,9 @@ panelom.
 4. Pokreni projekat sa `python main.py` (ili postavi tu komandu kao Run/Workflow).
    `main.py` pokreće `bot.py`.
 5. U konzoli provjeri da piše `Registrovano slash komandi: 28`.
+
+Komanda `.opis` pokazuje kako se koriste mini-igre i u kojim kanalima rade.
+Nepostojeće komande (npr. `.xo`) ne šalju opomenu.
 
 Komande za podešavanje koriste slash `/`, a obične članske komande prefix `.`.
 Slike greške iz razgovora nisu potrebne za rad bota i nisu u ovom ZIP-u.
@@ -290,6 +294,7 @@ Svi embed-i koriste sivo-crnu dark boju (`#2B2D31`) i kompaktan prikaz bez `>` o
 
 Prefix komande koriste odvojene kanale po kategoriji. Ako je kanal već nazvan
 po kategoriji, npr. `#kaladont` ili `#counting`, bot ga prepoznaje automatski.
+Ljubavne komande automatski rade i u kanalu `#brak-veza`.
 Za kanale drugačijih naziva administrator može eksplicitno podesiti tip:
 
 ```text
@@ -519,6 +524,26 @@ Tačni potezi i javna stanja igre ostaju u kanalu da igrači mogu pratiti rundu.
 Slash komande `/komande` i `/igre` se automatski registruju nakon pokretanja
 bota i prikazuju pregled prefix komandi i mini-igara.
 
+Komanda `.opis` objašnjava korake za Casino, Counting, Toplo-hladno i Kaladont
+i prikazuje kanal koji je administrator podesio. Bez posebnog podešavanja bot
+prepoznaje kanale čiji nazivi sadrže `casino`, `counting`, `toplo-hladno` ili
+`kaladont`; administratori mogu izabrati i druge kanale pomoću `/setkanal`.
+
+### Dodatne komande
+
+```text
+.ship @Korisnik
+.iq [@Korisnik]
+.opis
+.obrisi 100
+```
+
+`.ship` prikazuje zabavni procenat za označeni par; rezultat je stabilan za isti
+par. `.iq` daje šaljiv dnevni rezultat i nije pravi IQ test. `.opis` prikazuje
+uputstva za igre i njihove kanale. `.obrisi 100` briše do 100 poruka i zahtijeva
+dozvolu **Manage Messages** za člana i bota. Nepostojeća komanda poput `.xo`
+ne izaziva opomenu.
+
 Komanda `.pomoc` jednim unosom šalje jednu DM poruku sa tri stranice pomoći:
 `Pomoć 1/3`, `Pomoć 2/3` i `Pomoć 3/3`. Stranice se mijenjaju klikom na dugmad
 ispod embed poruke, kao mali navigacioni panel. Pojedinačna početna stranica
@@ -666,6 +691,9 @@ izazov i testove kompatibilnosti.
 Kaladont prihvata svaki ispravan sljedeći potez, čak i od istog člana, i provjerava
 da riječ postoji u B/H/S rječniku. Aktivnu rundu ne može resetovati običan član.
 Podaci se čuvaju atomarno kako prekid procesa ne bi oštetio postojeći profil.
+Stariji ljubavni profili dobijaju nedostajuća polja pri učitavanju; postojeći
+bodovi i datumi se čuvaju. Nepostojeće prefix komande ne šalju poruke članovima.
+`.obrisi` ograničava brisanje na 1–100 poruka i provjerava dozvole.
 
 Welcome, Info, Staff, Ticket, Report, Giveaway i pomoć dugmad koriste
 Discord custom emoji-je. Ponovno postavljanje panela u istom kanalu ažurira

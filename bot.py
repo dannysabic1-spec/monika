@@ -23,7 +23,7 @@ except ImportError:
 #              KONFIGURACIJA
 # ══════════════════════════════════════════════
 BOT_NAME   = "MONIKA BOT"
-VERSION    = "v4.8"
+VERSION    = "v4.9"
 TOKEN      = os.environ.get("DISCORD_TOKEN")
 BOT_PREFIX = "."
 
@@ -266,9 +266,7 @@ try:
 except Exception:
     pass
 
-# Uklanja Discord blockquote oznake iz svih embed poruka.
-# Ovo važi za opise, field vrijednosti, footer i author tekst,
-# pa nijedan embed više neće prikazivati neželjeni znak ">".
+# Ujednačava Discord blockquote izgled svih embed poruka.
 _ORIGINAL_EMBED_TO_DICT = discord.Embed.to_dict
 
 def _remove_embed_blockquotes(value):
@@ -462,38 +460,68 @@ def pomoc_allowed(data: dict, guild_id: int, user_id: int) -> bool:
 
 # ── Ljubavni profil ───────────────────────────
 def get_profile(data: dict, uid: int) -> dict:
+    """Vrati potpun ljubavni profil i popravi starije/nepotpune JSON zapise."""
+    relationships = data.get("relationships")
+    if not isinstance(relationships, dict):
+        relationships = data["relationships"] = {}
+
     key = str(uid)
-    if key not in data["relationships"]:
-        data["relationships"][key] = {
-            "partner_id":   None,
-            "status":       None,
-            "love":         0,
-            "xp":           0,
-            "last_sleep":   0,
-            "last_srce":    0,
-            "last_zagrljaj": 0,
-            "last_poljubac": 0,
-            "last_izlet":   0,
-            "last_vecera":  0,
-            "last_putovanje": 0,
-            "last_obnova":  0,
-            "veza_date":    None,
-            "brak_date":    None,
-            "prsten":       None,
-            "djeca":        [],
-            "ljubomora":    0,
-            "uspomene":     [],
-        }
-    p = data["relationships"][key]
-    # Dodaj nova polja ako nedostaju (backwards compat)
     defaults = {
-        "xp": 0, "last_zagrljaj": 0, "last_poljubac": 0,
-        "last_izlet": 0, "last_vecera": 0, "last_putovanje": 0,
-        "last_obnova": 0, "djeca": [], "ljubomora": 0, "uspomene": [],
+        "partner_id": None,
+        "status": None,
+        "love": 0,
+        "xp": 0,
+        "last_sleep": 0,
+        "last_srce": 0,
+        "last_zagrljaj": 0,
+        "last_poljubac": 0,
+        "last_izlet": 0,
+        "last_vecera": 0,
+        "last_putovanje": 0,
+        "last_obnova": 0,
+        "veza_date": None,
+        "brak_date": None,
+        "prsten": None,
+        "djeca": [],
+        "ljubomora": 0,
+        "uspomene": [],
     }
-    for k, v in defaults.items():
-        if k not in p:
-            p[k] = v
+
+    p = relationships.get(key)
+    if not isinstance(p, dict):
+        p = {}
+        relationships[key] = p
+    for field, default in defaults.items():
+        if field not in p:
+            p[field] = default.copy() if isinstance(default, list) else default
+
+    # Starije verzije su neke Discord ID-jeve čuvale kao tekst, a ponekad
+    # su profile ostavljale bez statusa ili sa nepotpunim brojačima.
+    partner_id = p.get("partner_id")
+    if partner_id is not None:
+        try:
+            p["partner_id"] = int(partner_id)
+        except (TypeError, ValueError):
+            p["partner_id"] = None
+    if p["status"] not in (None, "veza", "brak"):
+        p["status"] = "veza" if p["partner_id"] is not None else None
+    elif p["partner_id"] is not None and p["status"] is None:
+        p["status"] = "veza"
+    elif p["partner_id"] is None:
+        p["status"] = None
+
+    for field in (
+        "love", "xp", "last_sleep", "last_srce", "last_zagrljaj",
+        "last_poljubac", "last_izlet", "last_vecera", "last_putovanje",
+        "last_obnova", "ljubomora",
+    ):
+        try:
+            p[field] = max(0, int(p.get(field) or 0))
+        except (TypeError, ValueError, OverflowError):
+            p[field] = 0
+    for field in ("djeca", "uspomene"):
+        if not isinstance(p.get(field), list):
+            p[field] = []
     return p
 
 def couple_key(uid1: int, uid2: int) -> str:
@@ -1034,7 +1062,7 @@ GAME_INPUT_TIMES = {}
 GAME_INPUT_COOLDOWN_SECONDS = 0.75
 
 GAME_CHANNEL_NAME_ALIASES = {
-    "ljubav": ("ljubav", "love", "parovi"),
+    "ljubav": ("ljubav", "love", "parovi", "brak-veza", "veza"),
     "pecanje": ("pecanje", "ribolov", "fishing"),
     "ekonomija": ("ekonomija", "economija", "economy", "novac", "coins"),
     "kuca": ("kuca", "stan", "house"),
@@ -1179,7 +1207,7 @@ PREFIX_COMMAND_CHANNEL_TYPES = {
         name: "zabava"
         for name in (
             "pijte", "film", "istina", "izazov", "ljubavni-test",
-            "compatibility", "giveaways",
+            "compatibility", "giveaways", "ship", "iq",
         )
     },
     **{
@@ -1752,26 +1780,26 @@ def build_welcome_embed(member, guild: discord.Guild, cfg: dict, test: bool = Fa
             f"{'TEST • ' if test else ''}Dobrodošao/la na {guild.name}!"
         ),
         description=(
-            f"{emoji('love')} {member.mention} — dobrodošao/la!\n"
-            f"{emoji('fire')} Lijepo se smjesti, upoznaj ekipu i uživaj!\n"
-            f"{emoji('crayon')} Klikni ispod da poželiš dobrodošlicu."
+            f"> {emoji('love')} {member.mention} — dobrodošao/la!\n"
+            f"> {emoji('fire')} Lijepo se smjesti, upoznaj ekipu i uživaj!\n"
+            f"> {emoji('crayon')} Klikni ispod da poželiš dobrodošlicu."
         ),
         color=_LP,
     )
     # Tri inline polja daju ravnomjeran raspored pravila, chata i muzike.
     embed.add_field(
-        name=f"{emoji('ghost')} Pravila",
-        value=f"Pročitaj pravila u {pravila}.",
+        name=f"> {emoji('ghost')} Pravila",
+        value=f"> Pročitaj pravila u {pravila}.",
         inline=True,
     )
     embed.add_field(
-        name=f"{emoji('sharks')} Chat",
-        value=f"Druži se sa članovima u {chat}.",
+        name=f"> {emoji('sharks')} Chat",
+        value=f"> Druži se sa članovima u {chat}.",
         inline=True,
     )
     embed.add_field(
-        name=f"{emoji('mooncat')} Muzika",
-        value=f"Pronađi muziku u {music}.",
+        name=f"> {emoji('mooncat')} Muzika",
+        value=f"> Pronađi muziku u {music}.",
         inline=True,
     )
     avatar = getattr(member, "display_avatar", None)
@@ -2189,7 +2217,16 @@ class TicketCloseView(discord.ui.View):
         try:
             await interaction.channel.delete(reason="SQUAD ticket zatvoren")
         except discord.Forbidden:
-            pass
+            await interaction.followup.send(
+                "Tiket nije obrisan: botu nedostaje dozvola Manage Channels.",
+                ephemeral=True,
+            )
+        except discord.HTTPException as exc:
+            print(f"[TICKET] Zatvaranje nije uspjelo: HTTP {exc.status}.")
+            await interaction.followup.send(
+                "Discord nije uspio zatvoriti tiket. Pokušaj ponovo.",
+                ephemeral=True,
+            )
 
 class TicketPanelView(discord.ui.View):
     def __init__(self):
@@ -2294,18 +2331,41 @@ class TicketPanelView(discord.ui.View):
         embed = discord.Embed(
             title=f"{CUSTOM_EMOJI['ticket']} Otvoren tiket",
             description=(
-                f"Dobrodošao/la {interaction.user.mention}.\n"
-                "Napiši kako možemo pomoći i sačekaj odgovor staff tima."
+                f"> Dobrodošao/la {interaction.user.mention}.\n"
+                "> Napiši kako možemo pomoći i sačekaj odgovor staff tima."
             ),
             color=_LP,
         )
         embed.set_footer(text=f"{BOT_NAME} • Ticket Sistem")
         staff_mention = staff_role.mention if staff_role else None
-        await ticket_channel.send(
-            content=staff_mention,
-            embed=embed,
-            view=TicketCloseView(),
-        )
+        try:
+            await ticket_channel.send(
+                content=staff_mention,
+                embed=embed,
+                view=TicketCloseView(),
+            )
+        except discord.Forbidden:
+            try:
+                await ticket_channel.delete(reason="Ticket setup nije uspio")
+            except discord.HTTPException:
+                pass
+            await interaction.edit_original_response(
+                content=(
+                    "Ticket kanal je napravljen, ali bot ne može poslati poruku "
+                    "u njega. Provjeri dozvole View Channel i Send Messages."
+                )
+            )
+            return
+        except discord.HTTPException as exc:
+            print(f"[TICKET] Početna poruka nije poslata: HTTP {exc.status}.")
+            try:
+                await ticket_channel.delete(reason="Ticket setup nije uspio")
+            except discord.HTTPException:
+                pass
+            await interaction.edit_original_response(
+                content="Ticket nije dovršen. Provjeri dozvole bota i pokušaj ponovo."
+            )
+            return
         await interaction.edit_original_response(
             content=f"{CUSTOM_EMOJI['check']} Tvoj tiket je otvoren: {ticket_channel.mention}"
         )
@@ -3268,13 +3328,11 @@ async def on_member_unban(guild: discord.Guild, user: discord.User):
 
 @bot.event
 async def on_command_error(ctx: commands.Context, error):
-    if isinstance(error, commands.CommandNotFound) and ctx.guild:
-        channels = get_kanali(load_data(), ctx.guild.id)
-        game_types = ("counting", "toplo_hladno", "kaladont", "casino")
-        for game_type in game_types:
-            if channel_is_for_type(ctx.channel, game_type, channels):
-                await reject_game_input(ctx)
-                return
+    # Obična riječ ili kratak tekst koji počinje tačkom nije razlog za opomenu.
+    # Nepostojeće komande, npr. ".xo", zato ostaju bez odgovora; pravi unosi
+    # u igre obrađuju se odvojeno u on_message.
+    if isinstance(error, commands.CommandNotFound):
+        return
 
     if ctx.command and ctx.command.name in {
         "casino",
@@ -3300,16 +3358,34 @@ async def on_command_error(ctx: commands.Context, error):
             description=f"> {CUSTOM_EMOJI['close']} Nemaš dozvolu za ovu komandu!",
             color=_LP
         ))
-    elif isinstance(error, commands.CommandNotFound):
+    elif isinstance(error, commands.BotMissingPermissions):
         await ctx.send(embed=discord.Embed(
             description=(
-                f"> {CUSTOM_EMOJI['info']} Komanda nije pronađena. "
-                "Ukucaj `.pomoc` za listu komandi."
+                f"> {CUSTOM_EMOJI['info']} Botu nedostaje dozvola potrebna "
+                "za ovu komandu."
             ),
             color=_LP
         ))
+    elif isinstance(error, commands.CommandOnCooldown):
+        await ctx.send(embed=discord.Embed(
+            description=(
+                f"> {CUSTOM_EMOJI['clock']} Sačekaj još "
+                f"**{error.retry_after:.1f} sekundi**."
+            ),
+            color=_LP,
+        ))
     else:
-        print(f"[ERROR] {error}")
+        original = getattr(error, "original", error)
+        print(
+            f"[ERROR] Prefix komanda "
+            f"{ctx.command.qualified_name if ctx.command else 'nepoznata'} "
+            f"nije uspjela u serveru {ctx.guild.id if ctx.guild else 'DM'}:"
+        )
+        traceback.print_exception(
+            type(original),
+            original,
+            original.__traceback__,
+        )
         await ctx.send(embed=discord.Embed(
             description=(
                 f"> {CUSTOM_EMOJI['info']} Komanda je primljena, ali je došlo "
@@ -3317,6 +3393,39 @@ async def on_command_error(ctx: commands.Context, error):
             ),
             color=_LP
         ))
+
+@bot.command(name="obrisi")
+async def obrisi(ctx: commands.Context, broj: int):
+    """Obriši do 100 prethodnih poruka; zahtijeva Manage Messages."""
+    if ctx.guild is None:
+        await ctx.send("Ova komanda radi samo na serveru.")
+        return
+    if not ctx.author.guild_permissions.manage_messages:
+        await ctx.send("Za ovu komandu potrebna je dozvola Manage Messages.")
+        return
+    bot_member = ctx.guild.me
+    if bot_member is None or not bot_member.guild_permissions.manage_messages:
+        await ctx.send("Botu nedostaje dozvola Manage Messages u ovom kanalu.")
+        return
+    if not 1 <= broj <= 100:
+        await ctx.send("Unesi broj od 1 do 100, na primjer `.obrisi 100`.")
+        return
+
+    try:
+        deleted = await ctx.channel.purge(limit=broj + 1, bulk=True)
+    except discord.Forbidden:
+        await ctx.send("Discord je odbio brisanje. Provjeri dozvolu Manage Messages.")
+        return
+    except discord.HTTPException as exc:
+        print(f"[BRISANJE] Čišćenje poruka nije uspjelo: HTTP {exc.status}.")
+        await ctx.send("Poruke nisu obrisane. Provjeri dozvole bota i pokušaj ponovo.")
+        return
+
+    deleted_count = sum(message.id != ctx.message.id for message in deleted)
+    await ctx.send(
+        f"{CUSTOM_EMOJI['check']} Obrisano poruka: **{deleted_count}**.",
+        delete_after=8,
+    )
 
 # ══════════════════════════════════════════════
 #   /setkanal — Admin
@@ -3796,7 +3905,7 @@ async def welcome_podesi(
         content=(
             f"✅ Welcome je podešen za {kanal.mention} i test poruka je poslata. "
             f"Pri ulasku novog člana bot će pokušati poslati welcome "
-            f"{'u server kanal i DM' if dm else 'u server kanal'}."
+            "u podešeni server kanal."
         )
     )
 
@@ -4208,9 +4317,9 @@ async def ticket_postavi(
     embed = discord.Embed(
         title=f"{CUSTOM_EMOJI['ticket']} Otvori Tiket",
         description=(
-            "Treba ti pomoć? Otvori tiket!\n"
-            f"{CUSTOM_EMOJI['mail']} Privatni kanal vide samo ti i staff.\n"
-            f"{CUSTOM_EMOJI['file']} Opiši problem i sačekaj odgovor tima."
+            "> Treba ti pomoć? Otvori tiket!\n"
+            f"> {CUSTOM_EMOJI['mail']} Privatni kanal vide samo ti i staff.\n"
+            f"> {CUSTOM_EMOJI['file']} Opiši problem i sačekaj odgovor tima."
         ),
         color=_LP,
     )
@@ -5809,6 +5918,8 @@ async def profil(ctx: commands.Context, korisnik: discord.Member = None):
     target = korisnik or ctx.author
     data   = load_data()
     p      = get_profile(data, target.id)
+    # Sačuvaj migraciju ako je ovo stariji ili nepotpun ljubavni profil.
+    save_data(data)
     love   = p.get("love", 0)
     xp     = p.get("xp", 0)
     best   = get_best_prsten(love)
@@ -5854,6 +5965,107 @@ async def profil(ctx: commands.Context, korisnik: discord.Member = None):
 
     e.set_footer(text=f"{BOT_NAME} {VERSION} • Ljubavni sistem")
     await ctx.send(embed=e)
+
+@bot.command(name="ship")
+async def ship(ctx: commands.Context, korisnik: discord.Member):
+    """Zabavni, stabilni procenat hemije za dva člana."""
+    if not await check_kanal(ctx, "zabava"):
+        return
+    if korisnik.id == ctx.author.id:
+        await ctx.send(embed=discord.Embed(
+            description=f"> {CUSTOM_EMOJI['info']} Označi drugu osobu: `.ship @Korisnik`.",
+            color=_LP,
+        ))
+        return
+
+    first_id, second_id = sorted((ctx.author.id, korisnik.id))
+    seed = f"{ctx.guild.id if ctx.guild else 0}:{first_id}:{second_id}"
+    score = random.Random(seed).randint(1, 100)
+    if score >= 85:
+        verdict = "Savršen duo!"
+    elif score >= 65:
+        verdict = "Odlično se slažete."
+    elif score >= 40:
+        verdict = "Ima tu neke hemije."
+    else:
+        verdict = "Možda bolje kao prijatelji."
+
+    embed = discord.Embed(
+        title=f"{CUSTOM_EMOJI['heart']} Ship kalkulator",
+        description=(
+            f"> {ctx.author.mention} + {korisnik.mention}\n"
+            f">\n"
+            f"> **{score}%** — {verdict}\n"
+            f"> *Rezultat je samo zabava.*"
+        ),
+        color=_LP,
+    )
+    await ctx.send(
+        embed=embed,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+
+@bot.command(name="iq")
+async def iq(ctx: commands.Context, korisnik: discord.Member = None):
+    """Prikaži šaljiv, dnevno stabilan IQ rezultat; nije pravi test."""
+    if not await check_kanal(ctx, "zabava"):
+        return
+    target = korisnik or ctx.author
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    seed = f"iq:{ctx.guild.id if ctx.guild else 0}:{target.id}:{day}"
+    score = random.Random(seed).randint(55, 180)
+    embed = discord.Embed(
+        title=f"{CUSTOM_EMOJI['info']} IQ dana",
+        description=(
+            f"> {target.mention}: **{score} IQ**\n"
+            f"> Rezultat se mijenja jednom dnevno.\n"
+            f"> *Samo šala — nije stvarni IQ test.*"
+        ),
+        color=_LP,
+    )
+    await ctx.send(
+        embed=embed,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+
+@bot.command(name="opis")
+async def opis(ctx: commands.Context):
+    """Objasni upotrebu mini-igara i njihove kanale."""
+    data = load_data()
+    channels = get_kanali(data, ctx.guild.id) if ctx.guild else {}
+
+    def game_channel(tip: str, default_name: str) -> str:
+        channel_id = channels.get(tip)
+        return f"<#{channel_id}>" if channel_id else f"#{default_name}"
+
+    embed = discord.Embed(
+        title=f"{CUSTOM_EMOJI['book']} Uputstvo za mini-igre",
+        description=(
+            f"> **Casino** — {game_channel('casino', 'casino')}\n"
+            "> `.casino coin 50` ili `.casino slot 50` — ulog je broj novčića.\n"
+            ">\n"
+            f"> **Counting** — {game_channel('counting', 'counting')}\n"
+            "> Pokreni `.counting 1`, a zatim šalji samo `2`, `3` i dalje.\n"
+            ">\n"
+            f"> **Toplo-hladno** — {game_channel('toplo_hladno', 'toplo-hladno')}\n"
+            "> Pokreni `.toplo-hladno`, pa šalji brojeve od 1 do 100.\n"
+            ">\n"
+            f"> **Kaladont** — {game_channel('kaladont', 'kaladont')}\n"
+            "> Pokreni `.kaladont`, pa šalji obične riječi koje počinju "
+            "posljednja dva slova prethodne riječi. Riječ koja se završi na "
+            "**ka** završava rundu.\n"
+            ">\n"
+            f"> **Ship** — `.ship @Korisnik`; **IQ** — `.iq [@Korisnik]`.\n"
+            "> Igre rade u kanalima navedenim iznad. Ako koristiš drugačije "
+            "nazive, administrator ih može povezati komandom `/setkanal`."
+        ),
+        color=_LP,
+    )
+    embed.set_footer(text="Prefix komandi je tačka • .")
+    await ctx.send(
+        embed=embed,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
 
 # ══════════════════════════════════════════════
 #   .razvod — Raskid/razvod
