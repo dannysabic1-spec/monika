@@ -269,6 +269,37 @@ except Exception:
 # Ujednačava blockquote format u svim embedovima bez mijenjanja njihovog teksta.
 _ORIGINAL_EMBED_TO_DICT = discord.Embed.to_dict
 
+def _format_embed_title(value):
+    """Dodaj Mrak prefiks, prikaži naslov velikim slovima i ujednači Staff-Team."""
+    if not isinstance(value, str):
+        return value
+
+    prefix = "゛ー Mrak —"
+    # Ukloni postojeći prefiks prije formatiranja da funkcija bude idempotentna.
+    value = re.sub(
+        r"^\s*゛ー\s*Mrak\s*—\s*",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    parts = re.split(r"(<[^>]+>)", value)
+    formatted = []
+    for part in parts:
+        if part.startswith("<") and part.endswith(">"):
+            # Sačuvaj velika/mala slova u custom emoji-ju i Discord mentionu.
+            formatted.append(part)
+            continue
+        part = re.sub(
+            r"\bstaff[\s_-]*team\b",
+            "STAFF-TEAM",
+            part,
+            flags=re.IGNORECASE,
+        )
+        formatted.append(part.upper())
+    title = "".join(formatted).strip()
+    return f"{prefix} {title}".rstrip()
+
 def _blockquote_embed_text(value):
     if isinstance(value, str):
         # U embedovima zamijeni obične Unicode emoji-je odgovarajućim
@@ -352,6 +383,7 @@ def _clean_embed_to_dict(self):
         add_text_block(author_name)
 
     if title:
+        title = _format_embed_title(title)
         if title[0].isascii() and title[0].isalpha():
             title = f"{CUSTOM_EMOJI['info']} {title}"
         if title_url:
@@ -2135,7 +2167,7 @@ class InfoView(discord.ui.View):
         embed.set_footer(text=f"{BOT_NAME} {VERSION} • GWS & Events")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-class StaffApplicationModal(discord.ui.Modal, title="Staff prijava"):
+class StaffApplicationModal(discord.ui.Modal, title="STAFF-TEAM PRIJAVA"):
     godine = discord.ui.TextInput(
         label="Koliko imaš godina?",
         placeholder="Npr. 18",
@@ -2183,7 +2215,7 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff prijava"):
             return
 
         embed = discord.Embed(
-            title=f"{CUSTOM_EMOJI['file']} Nova Staff prijava",
+            title=f"{CUSTOM_EMOJI['file']} Nova Staff-Team prijava",
             description=(
                 f"Prijava korisnika {interaction.user.mention}"
             ),
@@ -2238,7 +2270,7 @@ class StaffPanelView(discord.ui.View):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Staff Apply",
+        label="PRIJAVI SE",
         emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["file"]),
         style=discord.ButtonStyle.danger,
         custom_id="squad_staff_apply",
@@ -2260,7 +2292,7 @@ class TicketCloseView(discord.ui.View):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Zatvori tiket",
+        label="ZATVORI TIKET",
         emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["lock"]),
         style=discord.ButtonStyle.danger,
         custom_id="squad_ticket_close",
@@ -2326,9 +2358,9 @@ class TicketPanelView(discord.ui.View):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Otvori Tiket",
+        label="OTVORI TIKET",
         emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["ticket"]),
-        style=discord.ButtonStyle.danger,
+        style=discord.ButtonStyle.primary,
         custom_id="squad_ticket_open",
     )
     async def open_ticket(
@@ -2422,14 +2454,26 @@ class TicketPanelView(discord.ui.View):
             return
 
         embed = discord.Embed(
-            title=f"{CUSTOM_EMOJI['ticket']} Otvoren tiket",
+            title=f"{CUSTOM_EMOJI['ticket']} TIKET JE OTVOREN",
             description=(
-                f"> Dobrodošao/la {interaction.user.mention}.\n"
-                "> Napiši kako možemo pomoći i sačekaj odgovor staff tima."
+                f"> {interaction.user.mention}, dobrodošao/la u svoj privatni tiket.\n"
+                "> Opiši problem što jasnije; staff tim će odgovoriti ovdje."
             ),
             color=_LP,
         )
-        embed.set_footer(text=f"{BOT_NAME} • Ticket Sistem")
+        embed.add_field(
+            name=f"{CUSTOM_EMOJI['info']} KAKO DALJE",
+            value="Pošalji detalje i dodaj slike ili fajlove ako pomažu.",
+            inline=False,
+        )
+        embed.add_field(
+            name=f"{CUSTOM_EMOJI['lock']} PRIVATAN KANAL",
+            value="Ovaj razgovor vide samo ti i ovlašteni staff.",
+            inline=False,
+        )
+        if interaction.guild.icon:
+            embed.set_thumbnail(url=interaction.guild.icon.url)
+        embed.set_footer(text="Kada je razgovor završen, staff može zatvoriti tiket.")
         staff_mention = staff_role.mention if staff_role else None
         try:
             await ticket_channel.send(
@@ -4313,15 +4357,15 @@ async def staff_postavi(
         return
 
     embed = discord.Embed(
-        title=f"{CUSTOM_EMOJI['file']} STAFF PRIJAVA",
+        title=f"{CUSTOM_EMOJI['file']} STAFF-TEAM",
         description=(
-            f"{CUSTOM_EMOJI['briefcase']} Otvorene su prijave za Staff tim servera!\n"
-            f"{CUSTOM_EMOJI['hand']} Klikni dugme ispod i popuni svoje podatke.\n"
-            f"{CUSTOM_EMOJI['lock']} Odgovori su privatni dok ne pošalješ prijavu."
+            f"{CUSTOM_EMOJI['briefcase']} Prijave za Staff-Team servera su otvorene.\n"
+            f"{CUSTOM_EMOJI['hand']} Klikni dugme ispod i popuni prijavni formular.\n"
+            f"{CUSTOM_EMOJI['lock']} Odgovori ostaju privatni do slanja prijave."
         ),
         color=_LP,
     )
-    embed.set_footer(text=f"{BOT_NAME} • Staff Prijava")
+    embed.set_footer(text="Prijava se šalje samo staff timu.")
     await interaction.response.defer(ephemeral=True, thinking=True)
     try:
         _message, updated = await upsert_panel_message(
@@ -4415,13 +4459,25 @@ async def ticket_postavi(
     embed = discord.Embed(
         title=f"{CUSTOM_EMOJI['ticket']} OTVORI TIKET",
         description=(
-            f"> **{CUSTOM_EMOJI['info']} Treba ti pomoć?** Otvori tiket!\n"
-            f"> **Privatni kanal:** vide samo ti i staff.\n"
-            f"> **Opiši problem** i sačekaj odgovor tima."
+            f"{CUSTOM_EMOJI['info']} POTREBNA TI JE POMOĆ?\n"
+            "Otvori privatni tiket i napiši šta se dogodilo. Član staff tima će "
+            "odgovoriti direktno u kanalu."
         ),
         color=_LP,
     )
-    embed.set_footer(text=f"{BOT_NAME} • Ticket Sistem")
+    embed.add_field(
+        name=f"{CUSTOM_EMOJI['lock']} PRIVATNOST",
+        value="Kanal vide samo ti i ovlašteni staff.",
+        inline=True,
+    )
+    embed.add_field(
+        name=f"{CUSTOM_EMOJI['message']} BRŽA POMOĆ",
+        value="Navedi detalje, korake i priloge koji objašnjavaju problem.",
+        inline=True,
+    )
+    if interaction.guild.icon:
+        embed.set_thumbnail(url=interaction.guild.icon.url)
+    embed.set_footer(text="Klikni dugme ispod za otvaranje tiketa.")
     await interaction.response.defer(ephemeral=True, thinking=True)
     try:
         _message, updated = await upsert_panel_message(
@@ -7502,7 +7558,7 @@ GAME_STICKER_FILES = {
 GAME_STICKER_ROTATION = {}
 
 def game_embed(title: str, lines, footer: str = None):
-    e = discord.Embed(title=title, color=_LP)
+    e = discord.Embed(title=_format_embed_title(title), color=_LP)
     e.description = "\n".join(lines)
     if footer:
         e.set_footer(text=footer)
@@ -7516,6 +7572,15 @@ async def send_game_embed(
     reply: bool = False,
 ):
     """Pošalji jedan embed sa odgovarajućim stikerom za mini-igru."""
+    member_mention = ctx.author.mention
+    if member_mention not in (embed.description or ""):
+        embed.description = (
+            f"{member_mention}\n\n{embed.description or ''}"
+        ).strip()
+    allowed_mentions = discord.AllowedMentions(
+        users=[ctx.author],
+        replied_user=False,
+    )
     filenames = GAME_STICKER_FILES.get(game, ())
     channel_key = f"{ctx.guild.id if ctx.guild else 0}:{ctx.channel.id}:{game}"
     image_index = GAME_STICKER_ROTATION.get(channel_key, 0)
@@ -7527,16 +7592,18 @@ async def send_game_embed(
         file = discord.File(image_path, filename=filename)
         if reply and ctx.message:
             await ctx.reply(
+                content=member_mention,
                 embed=embed,
                 file=file,
                 mention_author=False,
-                allowed_mentions=discord.AllowedMentions.none(),
+                allowed_mentions=allowed_mentions,
             )
         else:
             await ctx.send(
+                content=member_mention,
                 embed=embed,
                 file=file,
-                allowed_mentions=discord.AllowedMentions.none(),
+                allowed_mentions=allowed_mentions,
             )
         GAME_STICKER_ROTATION[channel_key] = (image_index + 1) % len(filenames)
         return
@@ -7544,14 +7611,16 @@ async def send_game_embed(
     print(f"[IGRE] Nedostaje stiker za igru {game}: {filename or 'nije podešen'}")
     if reply and ctx.message:
         await ctx.reply(
+            content=member_mention,
             embed=embed,
             mention_author=False,
-            allowed_mentions=discord.AllowedMentions.none(),
+            allowed_mentions=allowed_mentions,
         )
     else:
         await ctx.send(
+            content=member_mention,
             embed=embed,
-            allowed_mentions=discord.AllowedMentions.none(),
+            allowed_mentions=allowed_mentions,
         )
 
 async def send_kaladont_embed(ctx: commands.Context, embed: discord.Embed):
@@ -7570,7 +7639,11 @@ def counting_embed(number: int, next_number: int = None, author_mention: str = N
             f"> ✅ **#{number}** · sljedeći: **{next_number}**\n>\n"
             f"**Brojao/la:** {author_mention or 'Član'}"
         )
-    return discord.Embed(description=description, color=_LP)
+    return discord.Embed(
+        title="🔢 COUNTING",
+        description=description,
+        color=_LP,
+    )
 
 async def send_counting_reply(ctx: commands.Context, embed: discord.Embed):
     """Odgovori direktno na poruku s brojem, umjesto slanja nepovezane poruke."""
@@ -7627,6 +7700,14 @@ async def _counting_turn(ctx: commands.Context, broj: int):
             )
     if error_message:
         await add_game_result_reaction(ctx, correct=False)
+        await send_counting_reply(
+            ctx,
+            counting_embed(
+                broj,
+                author_mention=ctx.author.mention,
+                error=error_message,
+            ),
+        )
         return
     await add_game_result_reaction(ctx, correct=True)
     await send_counting_reply(ctx, embed)
@@ -7732,6 +7813,7 @@ async def counting(ctx: commands.Context, broj: int = None):
         await send_game_embed(
             ctx,
             discord.Embed(
+                title="🔢 COUNTING",
                 description=(
                     f"> 🔢 Sljedeći broj je **{expected}**.\n>\n"
                     "Pošalji samo sljedeći broj u counting kanal.\n"
@@ -7749,6 +7831,7 @@ async def counting(ctx: commands.Context, broj: int = None):
             await send_game_embed(
                 ctx,
                 discord.Embed(
+                    title="🔢 COUNTING",
                     description=(
                         "> ❌ Početni broj mora biti između **1** i "
                         "**999.999.999.999.999**."
@@ -7766,6 +7849,7 @@ async def counting(ctx: commands.Context, broj: int = None):
         await send_game_embed(
             ctx,
             discord.Embed(
+                title="🔢 COUNTING",
                 description=(
                     f"> 🔢 Brojanje je postavljeno na **{broj}**.\n>\n"
                     f"Sljedeći član šalje **{broj}** kao običnu poruku."

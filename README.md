@@ -721,9 +721,14 @@ se podebljavaju. Postojeći inline raspored fieldova ostaje sačuvan.
 Naslov, opis, slike, thumbnail, boja, timestamp, dugmad i funkcionalnost
 komandi ostaju sačuvani.
 
-Naslov bez postojeće ikone automatski dobija ikonu prije teksta, a postojeće
-ikone ostaju iste. Ticket panel naslov je `OTVORI TIKET` velikim slovima, a
-info emoji i podebljan tekst ističu pitanje „Treba ti pomoć?”.
+Svi naslovi embedova počinju sa `゛ー Mrak —`, a tekst naslova prikazuje se
+velikim slovima; `StaffTeam` se prikazuje kao `STAFF-TEAM`. Postojeće custom
+emoji ikone u naslovima ostaju sačuvane iza prefiksa. Naslov Ticket panela je
+`OTVORI TIKET`, sa
+odvojenim poljima za privatnost i detalje koji ubrzavaju pomoć. Dugme za
+otvaranje je istaknuto, a dugme za zatvaranje ostaje crveno.
+Odgovori mini-igara taguju člana u tekstu poruke i unutar embeda. Counting
+uključuje naslov `COUNTING` i taguje člana kada pokrene ili odigra potez.
 Iz footera se uklanjaju `MONIKA BOT` i verzija, pa cooldown ostaje samo kao
 `Cooldown: 24h`. Nakon izmjene obavezno restartuj bota.
 
