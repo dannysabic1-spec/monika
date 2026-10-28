@@ -717,16 +717,15 @@ naslov je podebljan i odvojen praznim redom, a svaka rečenica, oznaka i vrijedn
 dobijaju svoju `>` oznaku. To uključuje opis, nazive i vrijednosti fieldova,
 author tekst i footer tekst. Nazivi fieldova se prikazuju kao citirane oznake
 unutar njihove vrijednosti i podebljani su; kratke oznake prije dvotačke takođe
-se podebljavaju. Postojeći inline raspored fieldova ostaje sačuvan.
+se podebljavaju. Inline raspored ostaje sačuvan osim za Ticket panel.
 Naslov, opis, slike, thumbnail, boja, timestamp, dugmad i funkcionalnost
 komandi ostaju sačuvani.
 
-Svi naslovi embedova počinju sa `゛ー Mrak —`, a tekst naslova prikazuje se
-velikim slovima; `StaffTeam` se prikazuje kao `STAFF-TEAM`. Postojeće custom
-emoji ikone u naslovima ostaju sačuvane iza prefiksa. Naslov Ticket panela je
-`OTVORI TIKET`, sa
-odvojenim poljima za privatnost i detalje koji ubrzavaju pomoć. Dugme za
-otvaranje je istaknuto, a dugme za zatvaranje ostaje crveno.
+Svi naslovi embedova počinju postojećim custom emoji-jem, pa `゛ー Mrak —`,
+a zatim naslovom u normalnom pisanju, npr. `Counting`. `StaffTeam` se prikazuje
+kao `Staff-Team`, a `StaffApply` ostaje `StaffApply`. Ticket panel ima polja
+za privatnost i bržu pomoć složena jedno ispod drugog, sa dugmetom `Otvori tiket`;
+dugme za zatvaranje ostaje crveno.
 Odgovori mini-igara taguju člana u tekstu poruke i unutar embeda. Counting
 uključuje naslov `COUNTING` i taguje člana kada pokrene ili odigra potez.
 Iz footera se uklanjaju `MONIKA BOT` i verzija, pa cooldown ostaje samo kao

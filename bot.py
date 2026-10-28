@@ -270,35 +270,89 @@ except Exception:
 _ORIGINAL_EMBED_TO_DICT = discord.Embed.to_dict
 
 def _format_embed_title(value):
-    """Dodaj Mrak prefiks, prikaži naslov velikim slovima i ujednači Staff-Team."""
+    """Stavi postojeću ikonu ispred Mrak prefiksa i formatiraj naslov prirodno."""
     if not isinstance(value, str):
         return value
 
     prefix = "゛ー Mrak —"
+    value = value.strip()
+    title_icons = []
+
+    # Premjesti postojeće custom/Unicode ikonice ispred brendiranog prefiksa.
+    while value:
+        custom_emoji = re.match(r"<a?:[A-Za-z0-9_]+:\d+>", value)
+        if custom_emoji:
+            title_icons.append(custom_emoji.group(0))
+            value = value[custom_emoji.end():].lstrip()
+            continue
+        unicode_emoji = _UNICODE_EMOJI_RE.match(value)
+        if unicode_emoji:
+            title_icons.append(unicode_emoji.group(0))
+            value = value[unicode_emoji.end():].lstrip()
+            continue
+        break
+
     # Ukloni postojeći prefiks prije formatiranja da funkcija bude idempotentna.
     value = re.sub(
-        r"^\s*゛ー\s*Mrak\s*—\s*",
+        r"^゛ー\s*Mrak\s*—\s*",
         "",
         value,
         flags=re.IGNORECASE,
     ).strip()
 
+    # Podrži i raniji raspored u kojem je ikonica stajala iza Mrak oznake.
+    while value:
+        custom_emoji = re.match(r"<a?:[A-Za-z0-9_]+:\d+>", value)
+        if custom_emoji:
+            title_icons.append(custom_emoji.group(0))
+            value = value[custom_emoji.end():].lstrip()
+            continue
+        unicode_emoji = _UNICODE_EMOJI_RE.match(value)
+        if unicode_emoji:
+            title_icons.append(unicode_emoji.group(0))
+            value = value[unicode_emoji.end():].lstrip()
+            continue
+        break
+
+    if not title_icons:
+        # Ovo je isti postojeći Info emoji koji se ranije dodavao naslovima
+        # koji nisu imali ikonu.
+        title_icons.append(CUSTOM_EMOJI["info"])
+
     parts = re.split(r"(<[^>]+>)", value)
     formatted = []
+    special_terms = re.compile(
+        r"\bstaff[\s_-]*team\b|\bstaff[\s_-]*apply\b",
+        flags=re.IGNORECASE,
+    )
     for part in parts:
         if part.startswith("<") and part.endswith(">"):
             # Sačuvaj velika/mala slova u custom emoji-ju i Discord mentionu.
             formatted.append(part)
             continue
-        part = re.sub(
-            r"\bstaff[\s_-]*team\b",
-            "STAFF-TEAM",
-            part,
-            flags=re.IGNORECASE,
-        )
-        formatted.append(part.upper())
+        text_parts = []
+        cursor = 0
+        for match in special_terms.finditer(part):
+            text_parts.append(part[cursor:match.start()].lower())
+            matched = re.sub(r"[\s_-]+", "", match.group(0)).lower()
+            text_parts.append(
+                "Staff-Team" if matched == "staffteam" else "StaffApply"
+            )
+            cursor = match.end()
+        text_parts.append(part[cursor:].lower())
+        sentence = "".join(text_parts)
+        for index, character in enumerate(sentence):
+            if character.isalpha():
+                sentence = (
+                    sentence[:index]
+                    + character.upper()
+                    + sentence[index + 1:]
+                )
+                break
+        formatted.append(sentence)
+
     title = "".join(formatted).strip()
-    return f"{prefix} {title}".rstrip()
+    return f"{' '.join(title_icons)} {prefix} {title}".rstrip()
 
 def _blockquote_embed_text(value):
     if isinstance(value, str):
@@ -2167,7 +2221,7 @@ class InfoView(discord.ui.View):
         embed.set_footer(text=f"{BOT_NAME} {VERSION} • GWS & Events")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-class StaffApplicationModal(discord.ui.Modal, title="STAFF-TEAM PRIJAVA"):
+class StaffApplicationModal(discord.ui.Modal, title="Staff-Team prijava"):
     godine = discord.ui.TextInput(
         label="Koliko imaš godina?",
         placeholder="Npr. 18",
@@ -2270,7 +2324,7 @@ class StaffPanelView(discord.ui.View):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="PRIJAVI SE",
+        label="Prijavi se",
         emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["file"]),
         style=discord.ButtonStyle.danger,
         custom_id="squad_staff_apply",
@@ -2292,7 +2346,7 @@ class TicketCloseView(discord.ui.View):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="ZATVORI TIKET",
+        label="Zatvori tiket",
         emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["lock"]),
         style=discord.ButtonStyle.danger,
         custom_id="squad_ticket_close",
@@ -2358,7 +2412,7 @@ class TicketPanelView(discord.ui.View):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="OTVORI TIKET",
+        label="Otvori tiket",
         emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["ticket"]),
         style=discord.ButtonStyle.primary,
         custom_id="squad_ticket_open",
@@ -2462,12 +2516,12 @@ class TicketPanelView(discord.ui.View):
             color=_LP,
         )
         embed.add_field(
-            name=f"{CUSTOM_EMOJI['info']} KAKO DALJE",
+            name=f"{CUSTOM_EMOJI['info']} Kako dalje",
             value="Pošalji detalje i dodaj slike ili fajlove ako pomažu.",
             inline=False,
         )
         embed.add_field(
-            name=f"{CUSTOM_EMOJI['lock']} PRIVATAN KANAL",
+            name=f"{CUSTOM_EMOJI['lock']} Privatan kanal",
             value="Ovaj razgovor vide samo ti i ovlašteni staff.",
             inline=False,
         )
@@ -4459,21 +4513,21 @@ async def ticket_postavi(
     embed = discord.Embed(
         title=f"{CUSTOM_EMOJI['ticket']} OTVORI TIKET",
         description=(
-            f"{CUSTOM_EMOJI['info']} POTREBNA TI JE POMOĆ?\n"
+            f"{CUSTOM_EMOJI['info']} Potrebna ti je pomoć?\n"
             "Otvori privatni tiket i napiši šta se dogodilo. Član staff tima će "
             "odgovoriti direktno u kanalu."
         ),
         color=_LP,
     )
     embed.add_field(
-        name=f"{CUSTOM_EMOJI['lock']} PRIVATNOST",
+        name=f"{CUSTOM_EMOJI['lock']} Privatnost",
         value="Kanal vide samo ti i ovlašteni staff.",
-        inline=True,
+        inline=False,
     )
     embed.add_field(
-        name=f"{CUSTOM_EMOJI['message']} BRŽA POMOĆ",
+        name=f"{CUSTOM_EMOJI['message']} Brža pomoć",
         value="Navedi detalje, korake i priloge koji objašnjavaju problem.",
-        inline=True,
+        inline=False,
     )
     if interaction.guild.icon:
         embed.set_thumbnail(url=interaction.guild.icon.url)
