@@ -348,8 +348,14 @@ def _clean_embed_to_dict(self):
         if title[0].isascii() and title[0].isalpha():
             title = f"{CUSTOM_EMOJI['info']} {title}"
         if title_url:
-            title = f"[{title}]({title_url})"
+            title = f"[**{title}**]({title_url})"
+        else:
+            title = f"**{title}**"
         add_text_block(title)
+        if description or fields or (
+            isinstance(footer, dict) and footer.get("text")
+        ):
+            text_blocks.append("\u200b")
 
     add_text_block(description)
 
@@ -4394,7 +4400,7 @@ async def ticket_postavi(
     embed = discord.Embed(
         title=f"{CUSTOM_EMOJI['ticket']} Otvori Tiket",
         description=(
-            "> Treba ti pomoć? Otvori tiket!\n"
+            f"> {CUSTOM_EMOJI['info']} Treba ti pomoć? Otvori tiket!\n"
             f"> {CUSTOM_EMOJI['mail']} Privatni kanal vide samo ti i staff.\n"
             f"> {CUSTOM_EMOJI['file']} Opiši problem i sačekaj odgovor tima."
         ),
