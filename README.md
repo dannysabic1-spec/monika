@@ -20,11 +20,13 @@ Komanda `.opis` pokazuje kako se koriste mini-igre i u kojim kanalima rade.
 Nepostojeće komande (npr. `.xo`) ne šalju opomenu.
 Komande `.ship` i `.iq` pripadaju ljubavnom sistemu i rade samo u kanalu
 ljubavi (`#brak-veza` ili kanalu koji je administrator podesio preko
-`/setkanal`). Kaladont uvijek prikazuje WORD sliku, Counting sliku 1–4,
-a Toplo-hladno THTH sliku.
+`/setkanal`).
 
 Komande za podešavanje koriste slash `/`, a obične članske komande prefix `.`.
-Slike greške iz razgovora nisu potrebne za rad bota i nisu u ovom ZIP-u.
+Vlasnik bota može postaviti početni Counting broj, npr. `.counting 1240`;
+sljedeći članovi zatim šalju prikazani broj kao običnu poruku.
+ZIP uključuje slike za Counting, Toplo-hladno i Kaladont. Casino radi i bez
+dodatnih stikera, ali njegove slike nisu dio ovog paketa.
 
 ## 1. Instalacija
 
@@ -320,8 +322,9 @@ ostaju dostupne administratorima i prikazuju privatne potvrde.
 
 U `#kaladont` pokreni `.kaladont` jednom, pa svaki sljedeći igrač šalje samo
 riječ koja odgovara posljednja dva slova — bez ponavljanja komande. Za
-Toplo-hladno pokreni `.toplo-hladno`, pa upisuj samo brojeve. Za counting
-pokreni `.counting 1`, zatim upiši samo `2`, pa `3` i dalje.
+Toplo-hladno pokreni `.toplo-hladno`, pa upisuj samo brojeve. U Counting kanalu
+`.counting` prikazuje sljedeći broj. Samo vlasnik bota može postaviti početak,
+npr. `.counting 1240`; svi zatim šalju samo očekivani broj kao poruku.
 Tačan potez dobija ✅, pogrešan ❌. Pogrešan potez ne šalje tekst ni DM.
 Unosi su ograničeni na jedan potez svakih 0,75 sekundi po članu i kanalu; višak unosa se
 preskače bez javne poruke. Aktivnu rundu Toplo-hladno/Kaladonta može resetovati
@@ -499,24 +502,26 @@ Prefix svih komandi je tačka (`.`):
 
 - `.ekonomija` — pregled gotovine, banke i ekonomskih komandi
 - `.casino` — `coin` ili `slot`, minimalni ulog je 10 novčića
-- `.counting 1` — pokreni brojanje, zatim šalji samo sljedeći broj (`2`, `3`...)
+- `.counting` — prikaži sljedeći broj; samo vlasnik bota može postaviti početak, npr. `.counting 1240`
 - `.toplo-hladno` — pokreni rundu, zatim šalji brojeve od 1 do 100
 - `.kaladont` — pokreni rundu, zatim šalji obične riječi bez prefiksa
 
 Stanje svake igre je odvojeno po Discord kanalu. Counting prikazuje prihvaćeni
 broj i sljedeći broj kao reply embed. Svaki član može nastaviti brojanje ako
-upiše očekivani broj; pogrešan broj vraća brojač na 1 i dobija samo ❌.
+upiše očekivani broj; samo vlasnik bota može promijeniti početni broj komandom
+`.counting <broj>`. Pogrešan broj vraća brojač na 1 i dobija samo ❌.
 Broj se čuva u `ljubav_data.json` i preživljava restart.
 
 Kaladont prihvata riječ direktno u svom kanalu, provjerava slova, rječnik,
 ponavljanje i traženi nastavak. Prihvata se prvi ispravan potez bez obzira ko
-ga je poslao; pogrešna riječ ne šalje javni tekst. Odgovori u igrama imaju
-odgovarajući stiker i reakciju na originalnu poruku.
+ga je poslao; pogrešna riječ ne šalje javni tekst. Counting, Toplo-hladno i
+Kaladont koriste slike iz ovog paketa. Casino radi bez slike ako njegovi
+dodatni stikeri nisu dodani.
 
 U kanalima podešenim preko `/setkanal` za `counting`, `toplo-hladno`,
 `kaladont` ili `casino` može se slati unos bez prefixa:
 
-- `counting` — pokreni `.counting 1`, pa šalji samo `2`, `3`...
+- `counting` — provjeri broj sa `.counting`; vlasnik bota može postaviti početak, a svi šalju sljedeći broj kao poruku
 - `toplo-hladno` — pokreni `.toplo-hladno`, pa šalji brojeve `44`, `55`...
 - `kaladont` — prvo pokreni `.kaladont`, zatim šalji riječi direktno u kanal
 - `casino` — pošalji `coin 50` ili `slot 50`
@@ -526,7 +531,8 @@ ne šalje DM i ne kažnjava člana. Pogrešan kanal dobija privatno objašnjenje
 Tačni potezi i javna stanja igre ostaju u kanalu da igrači mogu pratiti rundu.
 
 Slash komande `/komande` i `/igre` se automatski registruju nakon pokretanja
-bota i prikazuju pregled prefix komandi i mini-igara.
+bota. `/komande` prikazuje prefix i slash komande abecednim redom, uz opise
+slash komandi; `/igre` objašnjava upotrebu mini-igara.
 
 Komanda `.opis` objašnjava korake za Casino, Counting, Toplo-hladno i Kaladont
 i prikazuje kanal koji je administrator podesio. Bez posebnog podešavanja bot
@@ -561,7 +567,7 @@ Kada se runda pokrene prefix komandom, nastavak se šalje kao obična poruka:
 
 - `.kaladont astma` → zatim drugi član šalje `mama`
 - `.toplo-hladno 44` → zatim članovi šalju `55`, `60` itd.
-- `.counting 1` → zatim članovi šalju `2`, `3` itd.
+- `.counting 1240` (vlasnik bota) → zatim članovi šalju `1240`, `1241` itd.
 
 Bot odgovara najviše jednom na jednu Discord poruku. Ako se ista poruka
 ipak pojavi dva puta, provjeri da nije pokrenut drugi primjerak bota u

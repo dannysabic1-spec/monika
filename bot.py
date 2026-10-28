@@ -266,7 +266,7 @@ try:
 except Exception:
     pass
 
-# Ujednačava Discord blockquote izgled svih embed poruka.
+# Ujednačava formatiranje teksta u embedovima bez mijenjanja njegovog sadržaja.
 _ORIGINAL_EMBED_TO_DICT = discord.Embed.to_dict
 
 def _remove_embed_blockquotes(value):
@@ -296,16 +296,9 @@ def _remove_embed_blockquotes(value):
         # embedu, uključujući znakove koje nove komande eventualno dodaju.
         # Custom Discord emoji format (<:Name:ID>) nije obuhvaćen ovim regexom.
         value = _UNICODE_EMOJI_RE.sub(CUSTOM_EMOJI["square"], value)
-        # Blockquote oznake se namjerno čuvaju. Embed tekstovi u botu
-        # koriste ">" na početku reda za željeni Discord izgled.
-        # Zero-width space sprečava da Discord prikaže samostalni znak ">"
-        # kada se koristi prazan blockquote kao vizuelni separator.
-        cleaned = value.replace(">\n", "> \u200b\n")
-        # Ne mijenjaj Unicode emoji-je po poziciji. Ranija zamjena je
-        # nasumično mijenjala ikone u welcome/staff/ticket panelima.
-        # Originalni emoji ostaje isti u svakoj poruci i nakon restarta.
-        # Ujednačen, kompaktan razmak: jedan separator između blokova,
-        # bez slučajnih višestrukih praznih redova.
+        # Ukloni samo Markdown blockquote prefiks i njegov nevidljivi
+        # separator; riječi, emoji i redoslijed sadržaja ostaju isti.
+        cleaned = re.sub(r"(?m)^> ?(?:\u200b)?", "", value)
         return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     if isinstance(value, list):
         return [_remove_embed_blockquotes(item) for item in value]
@@ -320,19 +313,16 @@ def _clean_embed_to_dict(self):
     payload = _ORIGINAL_EMBED_TO_DICT(self)
     payload = _remove_embed_blockquotes(payload)
 
-    # Naslov se prikazuje unutar description-a, a ne kao poseban Discord
-    # naslovni red. Tako svi embedovi imaju isti blockquote izgled.
-    title = payload.pop("title", None)
+    # Koristi Discordovo pravo title polje umjesto dodavanja naslova u opis.
+    # Tako naslov ostaje kratak i ne zauzima dodatne redove na telefonu.
+    title = payload.get("title")
     if title:
         if title[0].isascii() and title[0].isalpha():
             title = f"{CUSTOM_EMOJI['info']} {title}"
-        title_line = f"> **{title}**\n> \u200b"
-        description = payload.get("description")
-        payload["description"] = (
-            f"{title_line}\n{description}" if description else title_line
-        )
+        payload["title"] = title
 
-    # Footeri više ne prikazuju ime i verziju bota.
+    # Zadrži postojeći tekst footera, ali u Discordovom footer polju umjesto
+    # da ga dodaješ u opis. Ime i verzija bota se i dalje izostavljaju.
     footer = payload.get("footer")
     if isinstance(footer, dict) and isinstance(footer.get("text"), str):
         footer_text = re.sub(
@@ -342,10 +332,9 @@ def _clean_embed_to_dict(self):
         )
         footer_text = re.sub(r"\s*•\s*", " • ", footer_text).strip(" •")
         if footer_text:
-            description = payload.get("description", "")
-            separator = "\n> \u200b\n" if description else ""
-            payload["description"] = f"{description}{separator}> {footer_text}"
-        payload.pop("footer", None)
+            footer["text"] = footer_text
+        else:
+            payload.pop("footer", None)
     return payload
 
 discord.Embed.to_dict = _clean_embed_to_dict
@@ -1852,15 +1841,15 @@ async def remember_welcome_message(
 def build_command_catalog_embeds():
     """Napravi čitljiv, ažuran spisak registrovanih prefix i slash komandi."""
     prefix_commands = sorted(
-        {f".{command.name}" for command in bot.commands},
-        key=str.casefold,
+        bot.walk_commands(),
+        key=lambda command: command.qualified_name.casefold(),
     )
     slash_commands = sorted(
-        {f"/{command.name}" for command in bot.tree.get_commands()},
-        key=str.casefold,
+        bot.tree.get_commands(),
+        key=lambda command: command.name.casefold(),
     )
     embeds = []
-    page_size = 30
+    page_size = 15
     pages = [
         prefix_commands[index:index + page_size]
         for index in range(0, len(prefix_commands), page_size)
@@ -1868,17 +1857,26 @@ def build_command_catalog_embeds():
     for index, page in enumerate(pages, start=1):
         embeds.append(discord.Embed(
             title=f"📚 Prefix komande ({index}/{len(pages)})",
-            description=" · ".join(f"`{name}`" for name in page),
+            description="\n".join(
+                f"• `.{command.qualified_name}`"
+                + (f" — {command.short_doc}" if command.short_doc else "")
+                for command in page
+            ),
             color=_LP,
         ))
-    embeds.append(discord.Embed(
-        title="⚙️ Slash komande",
-        description=(
-            " · ".join(f"`{name}`" for name in slash_commands)
-            + "\n\nNeke komande su dostupne samo vlasniku bota ili administratorima."
-        ),
-        color=_LP,
-    ))
+    slash_pages = [
+        slash_commands[index:index + page_size]
+        for index in range(0, len(slash_commands), page_size)
+    ]
+    for index, page in enumerate(slash_pages, start=1):
+        embeds.append(discord.Embed(
+            title=f"⚙️ Slash komande ({index}/{len(slash_pages)})",
+            description="\n".join(
+                f"• `/{command.name}` — {command.description}"
+                for command in page
+            ),
+            color=_LP,
+        ))
     for embed in embeds:
         embed.set_footer(text=f"{BOT_NAME} {VERSION} • prefix: .")
     return embeds
@@ -1952,6 +1950,7 @@ class InfoView(discord.ui.View):
                 "> `.veza @Korisnik` — ljubavni sistem\n"
                 "> `.rad` i `.market` — virtuelna ekonomija\n"
                 "> `.pecanje` — ribolov i skupljanje coina\n"
+                "> `.counting` — vidi sljedeći broj; vlasnik bota može postaviti početak sa `.counting 1240`\n"
                 "> `.evidencija` — broj poruka i voice vrijeme\n"
                 "> `.topljubav`, `.topbogati` i `.top-ribar` — rang-liste\n"
                 "> Prati razgovore, upoznaj ekipu i učestvuj u eventima!"
@@ -3023,7 +3022,7 @@ async def on_message(message: discord.Message):
             configured_game_channels,
         ):
             if raw.isascii() and raw.isdigit():
-                await counting.callback(ctx, int(raw))
+                await _counting_turn(ctx, int(raw))
             elif raw:
                 await reject_game_input(ctx)
             return
@@ -6053,7 +6052,8 @@ async def opis(ctx: commands.Context):
             "> `.casino coin 50` ili `.casino slot 50` — ulog je broj novčića.\n"
             ">\n"
             f"> **Counting** — {game_channel('counting', 'counting')}\n"
-            "> Pokreni `.counting 1`, a zatim šalji samo `2`, `3` i dalje.\n"
+            "> Vlasnik bota može postaviti sljedeći broj komandom `.counting 1240`.\n"
+            "> Svi članovi zatim šalju samo prikazani sljedeći broj kao poruku.\n"
             ">\n"
             f"> **Toplo-hladno** — {game_channel('toplo_hladno', 'toplo-hladno')}\n"
             "> Pokreni `.toplo-hladno`, pa šalji brojeve od 1 do 100.\n"
@@ -7128,7 +7128,8 @@ def pomoc_pages():
                 "> **Ribolov**\n"
                 "> `.pecanje` · `.ribnjak [@Korisnik]` · `.prodaj` · `.ribar`\n\n"
                 "> **Mini-igre**\n"
-                "> `.counting 1` — zatim šalji samo sljedeći broj\n"
+                "> `.counting` — prikaži sljedeći broj; vlasnik bota može postaviti početak sa `.counting 1240`\n"
+                "> Svi članovi zatim šalju prikazani broj kao običnu poruku\n"
                 "> `.toplo-hladno` — zatim šalji samo brojeve od 1 do 100\n"
                 "> `.kaladont` — zatim šalji riječi direktno, bez komande\n"
                 "> ✅/❌ označava potez; detalji greške idu privatno autoru\n"
@@ -7400,6 +7401,7 @@ COUNTING_LOCKS = {}
 HOT_COLD_GAMES = {}
 HOT_COLD_LOCKS = {}
 PROCESSED_GAME_MESSAGE_IDS = set()
+COUNTING_MAX_START = 999_999_999_999_999
 KALADONT_STICKER_FILES = (
     "kaladont_sticker_2.jpg",
 )
@@ -7489,6 +7491,57 @@ async def send_counting_reply(ctx: commands.Context, embed: discord.Embed):
     except discord.HTTPException as exc:
         # Ne pokušavaj drugo slanje: prvi odgovor je možda već stigao do Discorda.
         print(f"[COUNTING] Jedini reply nije uspio u kanalu {ctx.channel.id}: {exc}")
+
+def ensure_counting_state(data: dict, game_key: str) -> dict:
+    """Vrati ispravno trajno stanje jedne counting igre."""
+    counting_data = data.setdefault("counting", {})
+    if not isinstance(counting_data, dict):
+        counting_data = data["counting"] = {}
+    state = counting_data.setdefault(
+        game_key,
+        {"next": 1, "last_user_id": None},
+    )
+    if not isinstance(state, dict):
+        state = counting_data[game_key] = {"next": 1, "last_user_id": None}
+    return state
+
+async def _counting_turn(ctx: commands.Context, broj: int):
+    """Obradi običan potez, bez vlasničke opcije za promjenu početnog broja."""
+    channel_id = ctx.channel.id
+    guild_id = ctx.guild.id if ctx.guild else 0
+    game_key = f"{guild_id}:{channel_id}"
+    lock = COUNTING_LOCKS.setdefault(game_key, asyncio.Lock())
+    if not await accept_game_input(ctx):
+        return
+    async with lock:
+        data = load_data()
+        state = ensure_counting_state(data, game_key)
+        expected = max(1, int(state.get("next", 1) or 1))
+
+        error_message = None
+        if broj != expected:
+            state.update({"next": 1, "last_user_id": None})
+            save_data(data)
+            error_message = (
+                f"Pogrešan broj. Očekivao se **{expected}**; brojanje je "
+                "vraćeno na **1**."
+            )
+        else:
+            state.update({"next": expected + 1, "last_user_id": ctx.author.id})
+            reward = 5 if expected % 10 == 0 else 1
+            wallet = get_ekonomija(data, ctx.author.id)
+            wallet["novac"] += reward
+            save_data(data)
+            embed = counting_embed(
+                broj,
+                next_number=broj + 1,
+                author_mention=ctx.author.mention,
+            )
+    if error_message:
+        await add_game_result_reaction(ctx, correct=False)
+        return
+    await add_game_result_reaction(ctx, correct=True)
+    await send_counting_reply(ctx, embed)
 
 @bot.command(name="ekonomija")
 async def ekonomija_igra(ctx: commands.Context):
@@ -7583,73 +7636,58 @@ async def counting(ctx: commands.Context, broj: int = None):
     guild_id = ctx.guild.id if ctx.guild else 0
     game_key = f"{guild_id}:{channel_id}"
     lock = COUNTING_LOCKS.setdefault(game_key, asyncio.Lock())
-    async with lock:
-        data = load_data()
-        counting_data = data.setdefault("counting", {})
-        if not isinstance(counting_data, dict):
-            counting_data = data["counting"] = {}
-        state = counting_data.setdefault(
-            game_key,
-            {"next": 1, "last_user_id": None},
-        )
-        if not isinstance(state, dict):
-            state = counting_data[game_key] = {"next": 1, "last_user_id": None}
-        expected = max(1, int(state.get("next", 1) or 1))
     if broj is None:
+        async with lock:
+            data = load_data()
+            state = ensure_counting_state(data, game_key)
+            expected = max(1, int(state.get("next", 1) or 1))
         await send_game_embed(
             ctx,
             discord.Embed(
                 description=(
                     f"> 🔢 Sljedeći broj je **{expected}**.\n>\n"
-                    "Pošalji samo broj u counting kanalu ili koristi "
-                    "`.counting <broj>`."
+                    "Pošalji samo sljedeći broj u counting kanal.\n"
+                    "Vlasnik bota može postaviti novi početak, npr. "
+                    "`.counting 1240`."
                 ),
                 color=_LP,
             ),
             "counting",
         )
         return
-    if not await accept_game_input(ctx):
-        return
-    async with lock:
-        # Učitaj ponovo unutar brave: dvije poruke u isto vrijeme ne mogu
-        # prihvatiti isti broj niti prepisati stanje jedna drugoj.
-        data = load_data()
-        counting_data = data.setdefault("counting", {})
-        if not isinstance(counting_data, dict):
-            counting_data = data["counting"] = {}
-        state = counting_data.setdefault(
-            game_key,
-            {"next": 1, "last_user_id": None},
-        )
-        if not isinstance(state, dict):
-            state = counting_data[game_key] = {"next": 1, "last_user_id": None}
-        expected = max(1, int(state.get("next", 1) or 1))
 
-        error_message = None
-        if broj != expected:
-            state.update({"next": 1, "last_user_id": None})
-            save_data(data)
-            error_message = (
-                f"Pogrešan broj. Očekivao se **{expected}**; brojanje je "
-                "vraćeno na **1**."
+    if await bot.is_owner(ctx.author):
+        if broj < 1 or broj > COUNTING_MAX_START:
+            await send_game_embed(
+                ctx,
+                discord.Embed(
+                    description=(
+                        "> ❌ Početni broj mora biti između **1** i "
+                        "**999.999.999.999.999**."
+                    ),
+                    color=_LP,
+                ),
+                "counting",
             )
-        else:
-            state.update({"next": expected + 1, "last_user_id": ctx.author.id})
-            reward = 5 if expected % 10 == 0 else 1
-            wallet = get_ekonomija(data, ctx.author.id)
-            wallet["novac"] += reward
+            return
+        async with lock:
+            data = load_data()
+            state = ensure_counting_state(data, game_key)
+            state.update({"next": broj, "last_user_id": None})
             save_data(data)
-            embed = counting_embed(
-                broj,
-                next_number=broj + 1,
-                author_mention=ctx.author.mention,
-            )
-    if error_message:
-        await add_game_result_reaction(ctx, correct=False)
+        await send_game_embed(
+            ctx,
+            discord.Embed(
+                description=(
+                    f"> 🔢 Brojanje je postavljeno na **{broj}**.\n>\n"
+                    f"Sljedeći član šalje **{broj}** kao običnu poruku."
+                ),
+                color=_LP,
+            ),
+            "counting",
+        )
         return
-    await add_game_result_reaction(ctx, correct=True)
-    await send_counting_reply(ctx, embed)
+    await _counting_turn(ctx, broj)
 
 @bot.command(name="toplo-hladno")
 async def toplo_hladno(ctx: commands.Context, pogodak: int = None):
@@ -8102,7 +8140,8 @@ async def poruka(
     embed.add_field(
         name="Igre, ribolov i rang-liste",
         value=(
-            "> `.casino coin <ulog>` · `.casino slot <ulog>` · `.counting 1`\n"
+            "> `.casino coin <ulog>` · `.casino slot <ulog>` · `.counting`\n"
+            "> Samo vlasnik bota postavlja početni broj sa `.counting 1240`.\n"
             "> `.toplo-hladno` · `.kaladont` · `.pijte` · `.film` · `.istina` · `.izazov`\n"
             "> `.pecanje` · `.ribnjak` · `.prodaj` · `.ribar`\n"
             "> `.evidencija [@Korisnik]` — Broj poruka i voice vrijeme\n"
@@ -8278,7 +8317,8 @@ async def opis_slash(interaction: discord.Interaction):
             title="• MONIKA BOT — Mini-igre 6/7",
             description=(
                 "> **Igre za kanal i članove**\n"
-                "> `.counting 1` — zatim šalji samo sljedeći broj.\n"
+                "> `.counting` — prikaži sljedeći broj; vlasnik bota može postaviti početak sa `.counting 1240`.\n"
+                "> Svi članovi zatim šalju prikazani broj kao običnu poruku.\n"
                 "> `.toplo-hladno` — zatim šalji brojeve od 1 do 100; vlasnik/admin može resetovati aktivnu rundu.\n"
                 "> `.kaladont` — zatim šalji riječi direktno u kanal, bez komande.\n"
                 "> `.pijte` — Pokreni zabavnu poruku za društvo.\n"
@@ -8352,29 +8392,26 @@ async def opis_slash(interaction: discord.Interaction):
         content="✅ Uputstvo je objavljeno."
     )
 
-@bot.tree.command(name="komande", description="Pregled svih prefix komandi i mini-igara")
+@bot.tree.command(name="komande", description="Abecedni pregled prefix i slash komandi")
 async def komande_slash(interaction: discord.Interaction):
-    e = game_embed(
-        "📚 Sve komande",
+    embeds = build_command_catalog_embeds()
+    embeds.append(game_embed(
+        "📖 Kako koristiti komande",
         [
-            "> Sve prefix komande počinju tačkom (`.`).",
-            "> ",
-            "> Mini-igre:",
-            "> `.casino [coin|slot] <ulog>`",
-            "> `.counting 1` — zatim šalji samo sljedeći broj",
-            "> `.toplo-hladno` — zatim šalji samo broj",
-            "> `.kaladont` — zatim šalji samo riječ",
-            "> `.ekonomija`",
-            "> ",
-            "> Ljubav: `.veza` · `.profil` · `.brak` · `.prsten` · `.svadba`",
-            "> Ekonomija: `.rad` · `.plata` · `.novac` · `.banka` · `.market`",
-            "> Kuća: `.stan` · `.kuca` · `.soba` · `.namjestaj`",
-            "> Ribolov: `.pecanje` · `.ribnjak` · `.prodaj` · `.ribar`",
-            "> Pomoć: `.pomoc` · `.pomoc 2` · `.pomoc 3`",
+            "> Prethodne stranice prikazuju sve prefix i slash komande abecednim redom.",
+            "> Prefix komanda: `.ime`; slash komanda: `/ime`.",
+            "> `.pomoc` prikazuje pregled kategorija, a `.opis` objašnjava mini-igre.",
+            "> `.counting` prikazuje sljedeći broj.",
+            "> Samo vlasnik bota može postaviti novi početak: `.counting 1240`.",
+            "> Nakon toga svi šalju prikazani sljedeći broj kao običnu poruku.",
         ],
         "Prefix: .",
+    ))
+    await interaction.response.send_message(
+        embeds=embeds,
+        ephemeral=True,
+        allowed_mentions=discord.AllowedMentions.none(),
     )
-    await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="igre", description="Pregled mini-igara")
 async def igre_slash(interaction: discord.Interaction):
@@ -8383,11 +8420,14 @@ async def igre_slash(interaction: discord.Interaction):
     e = game_embed(
         "🎮 Mini-igre",
         [
-            "> Casino: koristi `.casino coin 50` ili `.casino slot 50`.",
-            "> Brojanje: `.counting 1`, pa upisuj samo sljedeći broj.",
-            "> Toplo-hladno: `.toplo-hladno`, pa upisuj samo brojeve.",
-            "> Kaladont: `.kaladont`, pa upisuj samo sljedeću riječ.",
+            "> **Casino:** `.casino coin 50` ili `.casino slot 50` (ulog najmanje 10).",
+            "> **Counting:** `.counting` prikaže sljedeći broj; vlasnik bota može postaviti početak sa `.counting 1240`.",
+            "> Svi članovi zatim šalju prikazani broj kao običnu poruku.",
+            "> **Toplo-hladno:** `.toplo-hladno`, pa šalji brojeve od 1 do 100.",
+            "> **Kaladont:** `.kaladont`, pa šalji sljedeću riječ.",
+            "> **Zabava:** `.pijte`, `.film`, `.istina` i `.izazov`.",
             "> ✅/❌ označava potez; greške idu privatno, bez javnog teksta.",
+            "> Igre se koriste u odgovarajućem ili administratorski podešenom kanalu.",
         ],
         "Prefix svih igara: .",
     )
