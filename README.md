@@ -136,8 +136,8 @@ Zatim provjeri izgled:
 /welcome-test
 ```
 
-Welcome embed je kratak: pozdravlja člana i prikazuje samo podešene kanale
-pravila, chata i muzike. Avatar člana je prikazan kao thumbnail, a dugmad
+Welcome embed je kratak: pozdravlja člana i prikazuje svaki podešeni kanal
+pravila, chata i muzike u zasebnom redu. Avatar člana je prikazan kao thumbnail, a dugmad
 „Poželi dobrodošlicu“ i „Play music“ koriste postojeće MONIKA custom emoji-je.
 `/welcome-podesi` odmah šalje test welcome embed u odabrani kanal. Pri ulasku novog
 člana bot šalje welcome poruku samo u podešeni server kanal — welcome DM funkcija
@@ -171,6 +171,19 @@ otvori. U tom slučaju `.pomoc` prikazuje pomoć u kanalu, a `.poruka` šalje
 privatnu potvrdu autoru komande. Pozivnica se objavljuje jednom u kanalu u kojem
 je komanda pokrenuta; bot ne šalje pozivnice masovno u DM.
 
+### Obavještenja o server boostu
+
+Kao administrator postavi kanal za boost poruke:
+
+```text
+/boost-podesi kanal:#boostovi
+```
+
+Kada član počne boostovati server, bot šalje kratak embed u izabrani kanal,
+taguje člana i zahvali mu na podršci. Botu trebaju dozvole `Send Messages` i
+`Embed Links`; `Server Members Intent` treba biti uključen i u kodu i u Discord
+Developer Portalu.
+
 ## 5. Podešavanje Info/GWS & Events panela
 
 Podesi kanale:
@@ -185,11 +198,12 @@ Postavi mali panel:
 /info-postavi
 ```
 
-Panel ima tri dugmeta:
+Panel ima četiri dugmeta:
 
 - `Info` — pravila, informacije o serveru i načini zabave
 - `GWS & Events` — giveaway i event kanali
 - `Opis • sve komande` — privatan pregled svih registrovanih prefix i slash komandi
+- `Mini-Igre` — privatna pravila za Ljubavni sistem, Kaladont, Toplo-hladno i Brojanje
 
 Ponovno pokretanje `/info-postavi` ažurira postojeći panel u tom kanalu umjesto
 da objavi novu kopiju. Bot mora imati dozvole za čitanje historije poruka.

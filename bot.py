@@ -537,6 +537,7 @@ def load_data() -> dict:
         "counting": {},
         "support": {},
         "monika": {},
+        "boost": {},
         "pomoc_usage": {},
         "giveaways": {},
         "panel_messages": {},
@@ -829,6 +830,16 @@ def get_info(data: dict, guild_id: int) -> dict:
     for k, v in defaults.items():
         if k not in cfg:
             cfg[k] = v
+    return cfg
+
+def get_boost(data: dict, guild_id: int) -> dict:
+    """Podešavanja kanala za objave novih server boostova."""
+    configs = data.setdefault("boost", {})
+    key = str(guild_id)
+    if key not in configs or not isinstance(configs[key], dict):
+        configs[key] = {"channel_id": None}
+    cfg = configs[key]
+    cfg.setdefault("channel_id", None)
     return cfg
 
 def get_support(data: dict, guild_id: int) -> dict:
@@ -1925,16 +1936,13 @@ def build_welcome_embed(member, guild: discord.Guild, cfg: dict, test: bool = Fa
     lines = [
         f"> {CUSTOM_EMOJI['user']} {member.mention} — dobrodošao/la na **{guild.name}**!"
     ]
-    channels = []
     pravila = mention("pravila_channel_id")
     chat = mention("chat_channel_id")
     music = mention("music_channel_id")
     if pravila:
-        channels.append(f"{CUSTOM_EMOJI['book']} Pravila: {pravila}")
+        lines.append(f"> {CUSTOM_EMOJI['book']} Pravila: {pravila}")
     if chat:
-        channels.append(f"{CUSTOM_EMOJI['message']} Chat: {chat}")
-    if channels:
-        lines.append("> " + "  •  ".join(channels))
+        lines.append(f"> {CUSTOM_EMOJI['message']} Chat: {chat}")
     if music:
         lines.append(f"> {CUSTOM_EMOJI['music']} Muzika: {music}")
     lines.append(f"> {CUSTOM_EMOJI['heart']} Klikni dugme ispod da poželiš dobrodošlicu.")
@@ -2040,6 +2048,7 @@ class InfoView(discord.ui.View):
             "squad_info_details": "info",
             "squad_info_all_commands": "book",
             "squad_info_gws_events": "gift",
+            "squad_info_mini_games": "game",
         }
         for child in self.children:
             if isinstance(child, discord.ui.Button) and child.custom_id in button_emojis:
@@ -2196,6 +2205,64 @@ class InfoView(discord.ui.View):
         )
         embed.set_footer(text=f"{BOT_NAME} {VERSION} • GWS & Events")
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(
+        label="Mini-Igre",
+        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["game"]),
+        style=discord.ButtonStyle.secondary,
+        custom_id="squad_info_mini_games",
+    )
+    async def mini_games(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+        embed = discord.Embed(
+            title=f"{CUSTOM_EMOJI['game']} Mini-Igre",
+            description="> Četiri igre — četiri načina da kanal pretvoriš u malu avanturu:",
+            color=_LP,
+        )
+        embed.add_field(
+            name=f"{CUSTOM_EMOJI['heart']} Ljubavni sistem",
+            value=(
+                "> Pošalji `.veza @član` i sačekaj da druga osoba prihvati prijedlog reakcijom ✅.\n"
+                "> Kad ste zajedno, skupljajte ljubavne bodove i XP kroz komande poput `.srce` i `.spavanje`."
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name=f"{CUSTOM_EMOJI['book']} Kaladont",
+            value=(
+                "> Pokreni `.kaladont`, pa pošalji prvu riječ. Svaka sljedeća mora početi "
+                "posljednja dva slova prethodne — bez ponavljanja.\n"
+                "> Riječ koja se završi na **KA** zatvara rundu!"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name=f"{CUSTOM_EMOJI['target']} Toplo-hladno",
+            value=(
+                "> Pokreni `.toplo-hladno`. Bot zamisli broj od **1 do 100**; pogađaj "
+                "slanjem običnih brojeva u kanal.\n"
+                "> Odgovori ti kažu da li si hladno, toplo ili vrelo — i da li trebaš ići više ili niže."
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name=f"{CUSTOM_EMOJI['game']} Brojanje",
+            value=(
+                "> Provjeri `.counting` da vidiš sljedeći broj, pa pošalji baš taj broj "
+                "kao običnu poruku.\n"
+                "> Držite niz bez greške: pogrešan broj vraća brojač na **1**."
+            ),
+            inline=False,
+        )
+        embed.set_footer(text=f"{BOT_NAME} {VERSION} • Mini-Igre")
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
 class StaffApplicationModal(discord.ui.Modal, title="Staff-Team prijava"):
     godine = discord.ui.TextInput(
@@ -3423,6 +3490,65 @@ async def on_member_join(member: discord.Member):
             print(f"[WELCOME] Podešena uloga {role_id} više ne postoji.")
 
 @bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    """Objavi poruku kad član prvi put počne boostovati server."""
+    if before.premium_since is not None or after.premium_since is None:
+        return
+
+    data = load_data()
+    cfg = get_boost(data, after.guild.id)
+    channel_id = cfg.get("channel_id")
+    if not channel_id:
+        return
+
+    channel = after.guild.get_channel(channel_id)
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(channel_id)
+        except discord.HTTPException as exc:
+            print(f"[BOOST] Kanal {channel_id} nije dostupan: {exc}")
+            return
+    if not isinstance(channel, discord.TextChannel) or channel.guild.id != after.guild.id:
+        print(f"[BOOST] Podešeni kanal {channel_id} nije tekstualni kanal ovog servera.")
+        return
+
+    bot_member = after.guild.me
+    if bot_member is None:
+        print(f"[BOOST] Ne mogu provjeriti dozvole na serveru {after.guild.id}.")
+        return
+    permissions = channel.permissions_for(bot_member)
+    if not permissions.send_messages or not permissions.embed_links:
+        print(f"[BOOST] Bot nema Send Messages/Embed Links u kanalu {channel_id}.")
+        return
+
+    embed = discord.Embed(
+        title=f"{CUSTOM_EMOJI['rocket']} Boost aktiviran!",
+        description=(
+            f"> {CUSTOM_EMOJI['user']} {after.mention} je boostovao/la "
+            f"**{after.guild.name}**!\n"
+            f"> {CUSTOM_EMOJI['sparkles']} Hvala ti što pomažeš serveru da raste."
+        ),
+        color=_LP,
+        timestamp=datetime.now(timezone.utc),
+    )
+    embed.set_thumbnail(url=after.display_avatar.url)
+    embed.set_footer(text=f"{BOT_NAME} {VERSION} • hvala na podršci")
+    try:
+        await channel.send(
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions(
+                users=[after],
+                roles=False,
+                everyone=False,
+            ),
+        )
+        print(f"[BOOST] Objava poslata za člana {after.id} u kanal {channel_id}.")
+    except discord.Forbidden:
+        print(f"[BOOST] Bot nema dozvolu za slanje u kanalu {channel_id}.")
+    except discord.HTTPException as exc:
+        print(f"[BOOST] Objava nije poslata u kanal {channel_id}: {exc}")
+
+@bot.event
 async def on_voice_state_update(
     member: discord.Member,
     before: discord.VoiceState,
@@ -4205,6 +4331,56 @@ async def welcome_iskljuci(interaction: discord.Interaction):
         ephemeral=True,
     )
 
+@bot.tree.command(
+    name="boost-podesi",
+    description="[ADMIN] Podesi kanal za obavještenja o server boostovima",
+)
+@app_commands.describe(kanal="Tekstualni kanal za boost poruke")
+@app_commands.default_permissions(administrator=True)
+async def boost_podesi(
+    interaction: discord.Interaction,
+    kanal: discord.TextChannel,
+):
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message(
+            "Ova komanda se koristi samo na serveru.",
+            ephemeral=True,
+        )
+        return
+
+    bot_member = guild.me
+    if bot_member is None:
+        await interaction.response.send_message(
+            "Ne mogu provjeriti dozvole bota na ovom serveru.",
+            ephemeral=True,
+        )
+        return
+
+    permissions = kanal.permissions_for(bot_member)
+    if not permissions.send_messages or not permissions.embed_links:
+        await interaction.response.send_message(
+            f"Bot nema Send Messages i/ili Embed Links dozvolu u {kanal.mention}.",
+            ephemeral=True,
+        )
+        return
+
+    data = load_data()
+    cfg = get_boost(data, guild.id)
+    cfg["channel_id"] = kanal.id
+    save_data(data)
+
+    embed = discord.Embed(
+        title=f"{CUSTOM_EMOJI['rocket']} Boost poruke podešene",
+        description=(
+            f"> Nove boost objave stizaće u {kanal.mention}.\n"
+            f"> Kada član počne boostovati **{guild.name}**, bot će poslati kratku "
+            "poruku zahvalnosti."
+        ),
+        color=_LP,
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
 # ══════════════════════════════════════════════
 #   INFO PANEL — Admin podešavanja
 # ══════════════════════════════════════════════
@@ -4268,7 +4444,7 @@ async def info_postavi(interaction: discord.Interaction):
         description=(
             "> Klikni **Info** za pravila, **Opis • sve komande** za spisak komandi "
             "ili **GWS & Events** za giveawaye i evente.\n"
-            "> Isprobaj i mini-igru `.kaladont`."
+            "> Klikni **Mini-Igre** za pravila Ljubavnog sistema, Kaladonta, Toplo-hladno i Brojanja."
         ),
         color=_LP,
     )
@@ -7548,6 +7724,7 @@ async def pomoc(ctx: commands.Context, stranica: str = "1"):
         "> `/welcome-status` — Pregled welcome podešavanja\n"
         "> `/welcome-test` — Pošalji test poruku\n"
         "> `/welcome-iskljuci` — Isključi welcome sistem\n"
+        "> `/boost-podesi` — Podesi kanal za boost objave\n"
         "> `/info-podesi` — Podesi Info/GWS kanal\n"
         "> `/info-postavi` — Pošalji Info panel\n"
         "> `/info-status` — Pregled Info podešavanja\n"
