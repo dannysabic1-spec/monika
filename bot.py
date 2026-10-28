@@ -308,6 +308,13 @@ def _blockquote_embed_text(value):
             line = raw_line.strip()
             if not line:
                 continue
+            # Make short label-style phrases stand out, while leaving URLs
+            # and labels that are already bold exactly as written.
+            line = re.sub(
+                r"^(?!\*\*)(?!https?://)([^:\n]{1,48}:)(?=\s|$)",
+                r"**\1**",
+                line,
+            )
             # Put each sentence on its own quoted line. Existing line breaks
             # are also preserved as separate quoted lines.
             sentences = re.split(r"(?<=[.!?])\s+(?=[^\s])", line)
@@ -364,7 +371,15 @@ def _clean_embed_to_dict(self):
         for field in fields:
             if not isinstance(field, dict):
                 continue
-            quoted_name = _blockquote_embed_text(field.get("name"))
+            field_name = field.get("name")
+            if isinstance(field_name, str) and field_name.strip():
+                field_name = field_name.strip()
+                if not (
+                    field_name.startswith("**")
+                    and field_name.endswith("**")
+                ):
+                    field_name = f"**{field_name}**"
+            quoted_name = _blockquote_embed_text(field_name)
             quoted_value = _blockquote_embed_text(field.get("value"))
             field_lines = [text for text in (quoted_name, quoted_value) if text]
             if not field_lines:
@@ -4398,11 +4413,11 @@ async def ticket_postavi(
     save_data(data)
 
     embed = discord.Embed(
-        title=f"{CUSTOM_EMOJI['ticket']} Otvori Tiket",
+        title=f"{CUSTOM_EMOJI['ticket']} OTVORI TIKET",
         description=(
-            f"> {CUSTOM_EMOJI['info']} Treba ti pomoć? Otvori tiket!\n"
-            f"> {CUSTOM_EMOJI['mail']} Privatni kanal vide samo ti i staff.\n"
-            f"> {CUSTOM_EMOJI['file']} Opiši problem i sačekaj odgovor tima."
+            f"> **{CUSTOM_EMOJI['info']} Treba ti pomoć?** Otvori tiket!\n"
+            f"> **Privatni kanal:** vide samo ti i staff.\n"
+            f"> **Opiši problem** i sačekaj odgovor tima."
         ),
         color=_LP,
     )

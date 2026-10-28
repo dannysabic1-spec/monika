@@ -716,12 +716,14 @@ Sav vidljivi tekst u embedovima prikazuje se kao Discord blockquote:
 naslov je podebljan i odvojen praznim redom, a svaka rečenica, oznaka i vrijednost
 dobijaju svoju `>` oznaku. To uključuje opis, nazive i vrijednosti fieldova,
 author tekst i footer tekst. Nazivi fieldova se prikazuju kao citirane oznake
-unutar njihove vrijednosti; postojeći inline raspored fieldova ostaje sačuvan.
+unutar njihove vrijednosti i podebljani su; kratke oznake prije dvotačke takođe
+se podebljavaju. Postojeći inline raspored fieldova ostaje sačuvan.
 Naslov, opis, slike, thumbnail, boja, timestamp, dugmad i funkcionalnost
 komandi ostaju sačuvani.
 
 Naslov bez postojeće ikone automatski dobija ikonu prije teksta, a postojeće
-ikone ostaju iste. Ticket panel sada ima info emoji uz „Treba ti pomoć?”.
+ikone ostaju iste. Ticket panel naslov je `OTVORI TIKET` velikim slovima, a
+info emoji i podebljan tekst ističu pitanje „Treba ti pomoć?”.
 Iz footera se uklanjaju `MONIKA BOT` i verzija, pa cooldown ostaje samo kao
 `Cooldown: 24h`. Nakon izmjene obavezno restartuj bota.
 
