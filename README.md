@@ -136,16 +136,16 @@ Zatim provjeri izgled:
 /welcome-test
 ```
 
-Welcome embed ima tri ravnomjerno poravnata inline polja za pravila, chat i muziku,
-thumbnail novog člana i custom emoji-je na dugmadima.
+Welcome embed je kratak: pozdravlja člana i prikazuje samo podešene kanale
+pravila, chata i muzike. Avatar člana je prikazan kao thumbnail, a dugmad
+„Poželi dobrodošlicu“ i „Play music“ koriste postojeće MONIKA custom emoji-je.
 `/welcome-podesi` odmah šalje test welcome embed u odabrani kanal. Pri ulasku novog
 člana bot šalje welcome poruku samo u podešeni server kanal — welcome DM funkcija
 je uklonjena. `Server Members Intent` mora biti uključen i u kodu
 i u Discord Developer Portalu. Test komanda prijavljuje dozvolu koja nedostaje ako
 bot ne može slati poruke ili embede.
-Welcome poruke, test i welcome status koriste sedam dostavljenih custom emoji-ja.
-Bot ih prvo traži među emoji-jima servera/aplikacije i koristi postojeće MONIKA
-emoji-je kao fallback ako neki od njih nije dostupan.
+Welcome poruke, test, welcome status i dugmad koriste isključivo postojeće
+MONIKA custom emoji-je iz konfiguracije bota.
 
 Pregled podešavanja:
 

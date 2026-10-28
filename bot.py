@@ -106,21 +106,14 @@ CUSTOM_EMOJI = {
     "game":     "<:Gamepad2:1517941043780387057>",
 }
 
-# Custom emoji-ji koje je korisnik poslao za welcome poruke.
-# Ako neki od njih nije dostupan na serveru/aplikaciji, koristi se odgovarajući
-# već provjeren MONIKA emoji kao siguran fallback.
-WELCOME_EMOJI_DEFINITIONS = {
-    "love": ("60711imloved5", 1504507385039818842, "heart"),
-    "sparkles": ("55277bluesparkles", 1504507374050873535, "sparkles"),
-    "ghost": ("54987ghostblue", 1504507371014324264, "moon"),
-    "sharks": ("54927gummysharks", 1504507368912847040, "target"),
-    "mooncat": ("46394mooncatblue", 1504507328807047209, "moon"),
-    "crayon": ("42546bluecrayon", 1504507316282593361, "book"),
-    "fire": ("39236dumpsterfire", 1504507313011036432, "flame"),
-}
-WELCOME_EMOJI = {
-    key: CUSTOM_EMOJI[fallback_key]
-    for key, (_name, _emoji_id, fallback_key) in WELCOME_EMOJI_DEFINITIONS.items()
+WELCOME_EMOJI_KEYS = {
+    "love": "heart",
+    "sparkles": "sparkles",
+    "ghost": "moon",
+    "sharks": "target",
+    "mooncat": "moon",
+    "crayon": "book",
+    "fire": "flame",
 }
 
 # Sigurne zamjene ako neki emoji još nije uploadovan u Developer Portalu.
@@ -227,9 +220,6 @@ async def load_application_emojis():
                 matched += 1
             else:
                 missing.append(f"{key} ({discord_name})")
-        for key, (emoji_name, _emoji_id, _fallback_key) in WELCOME_EMOJI_DEFINITIONS.items():
-            if emoji_name.lower() in by_name:
-                WELCOME_EMOJI[key] = by_name[emoji_name.lower()]
         APPLICATION_EMOJIS_LOADED = True
         if missing:
             print(
@@ -246,13 +236,8 @@ async def load_application_emojis():
               f"{len(CUSTOM_EMOJI)} upisanih ID-jeva: {exc}")
 
 def welcome_emoji(guild, key: str) -> str:
-    """Vrati welcome emoji iz servera/aplikacije ili sigurni MONIKA fallback."""
-    emoji_name, emoji_id, fallback_key = WELCOME_EMOJI_DEFINITIONS[key]
-    get_emoji = getattr(guild, "get_emoji", None)
-    server_emoji = get_emoji(emoji_id) if get_emoji else None
-    if server_emoji:
-        return str(server_emoji)
-    return WELCOME_EMOJI.get(key, CUSTOM_EMOJI[fallback_key])
+    """Koristi isključivo postojeće custom emoji-je iz MONIKA seta."""
+    return CUSTOM_EMOJI[WELCOME_EMOJI_KEYS[key]]
 
 def component_custom_emoji(value: str) -> discord.PartialEmoji:
     """Pretvori Discord zapis custom emoji-ja u format za dugmad."""
@@ -1788,14 +1773,14 @@ class WelcomeView(discord.ui.View):
 
         if music_channel_id and guild_id:
             self.add_item(discord.ui.Button(
-                label="play music",
+                label="Play music",
                 emoji=component_custom_emoji(CUSTOM_EMOJI["music"]),
                 style=discord.ButtonStyle.link,
                 url=f"https://discord.com/channels/{guild_id}/{music_channel_id}",
             ))
         else:
             self.add_item(discord.ui.Button(
-                label="play music",
+                label="Play music",
                 emoji=component_custom_emoji(CUSTOM_EMOJI["music"]),
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
@@ -1804,10 +1789,7 @@ class WelcomeView(discord.ui.View):
 
     @discord.ui.button(
         label="Poželi dobrodošlicu",
-        emoji=discord.PartialEmoji(
-            name="imloved5",
-            id=1504507385039818842,
-        ),
+        emoji=discord.PartialEmoji.from_str(CUSTOM_EMOJI["heart"]),
         style=discord.ButtonStyle.secondary,
         custom_id="squad_welcome_greet",
     )
@@ -1932,44 +1914,38 @@ class WelcomeView(discord.ui.View):
         )
 
 def build_welcome_embed(member, guild: discord.Guild, cfg: dict, test: bool = False):
-    """Kompaktna welcome poruka za nove članove, test i pregled podešavanja."""
-    def mention(channel_key: str, fallback: str) -> str:
+    """Jednostavan welcome embed sa kratkim tekstom i podešenim kanalima."""
+    def mention(channel_key: str) -> str | None:
         channel_id = cfg.get(channel_key)
-        return f"<#{channel_id}>" if channel_id else fallback
+        return f"<#{channel_id}>" if channel_id else None
 
     def emoji(key: str) -> str:
         return welcome_emoji(guild, key)
 
-    pravila = mention("pravila_channel_id", "#pravila")
-    chat = mention("chat_channel_id", "#chat")
-    music = mention("music_channel_id", "nije podešen")
+    lines = [
+        f"> {CUSTOM_EMOJI['user']} {member.mention} — dobrodošao/la na **{guild.name}**!"
+    ]
+    channels = []
+    pravila = mention("pravila_channel_id")
+    chat = mention("chat_channel_id")
+    music = mention("music_channel_id")
+    if pravila:
+        channels.append(f"{CUSTOM_EMOJI['book']} Pravila: {pravila}")
+    if chat:
+        channels.append(f"{CUSTOM_EMOJI['message']} Chat: {chat}")
+    if channels:
+        lines.append("> " + "  •  ".join(channels))
+    if music:
+        lines.append(f"> {CUSTOM_EMOJI['music']} Muzika: {music}")
+    lines.append(f"> {CUSTOM_EMOJI['heart']} Klikni dugme ispod da poželiš dobrodošlicu.")
+
     embed = discord.Embed(
         title=(
             f"{emoji('sparkles')} "
-            f"{'TEST • ' if test else ''}Dobrodošao/la na {guild.name}!"
+            f"{'Test • ' if test else ''}Dobrodošao/la!"
         ),
-        description=(
-            f"> {emoji('love')} {member.mention} — dobrodošao/la!\n"
-            f"> {emoji('fire')} Lijepo se smjesti, upoznaj ekipu i uživaj!\n"
-            f"> {emoji('crayon')} Klikni ispod da poželiš dobrodošlicu."
-        ),
+        description="\n".join(lines),
         color=_LP,
-    )
-    # Tri inline polja daju ravnomjeran raspored pravila, chata i muzike.
-    embed.add_field(
-        name=f"> {emoji('ghost')} Pravila",
-        value=f"> Pročitaj pravila u {pravila}.",
-        inline=True,
-    )
-    embed.add_field(
-        name=f"> {emoji('sharks')} Chat",
-        value=f"> Druži se sa članovima u {chat}.",
-        inline=True,
-    )
-    embed.add_field(
-        name=f"> {emoji('mooncat')} Muzika",
-        value=f"> Pronađi muziku u {music}.",
-        inline=True,
     )
     avatar = getattr(member, "display_avatar", None)
     if avatar:
@@ -4071,7 +4047,7 @@ async def welcome_podesi(
     )
     try:
         preview_message = await kanal.send(
-            content="🧪 Test welcome poruka nakon podešavanja",
+            content=f"{CUSTOM_EMOJI['sparkles']} Test welcome poruka nakon podešavanja",
             embed=build_welcome_embed(interaction.user, interaction.guild, cfg, test=True),
             view=welcome_view,
             allowed_mentions=discord.AllowedMentions.none(),
@@ -4099,7 +4075,7 @@ async def welcome_podesi(
         return
     await interaction.edit_original_response(
         content=(
-            f"✅ Welcome je podešen za {kanal.mention} i test poruka je poslata. "
+            f"{CUSTOM_EMOJI['check']} Welcome je podešen za {kanal.mention} i test poruka je poslata. "
             f"Pri ulasku novog člana bot će pokušati poslati welcome "
             "u podešeni server kanal."
         )
@@ -4184,7 +4160,7 @@ async def welcome_test(interaction: discord.Interaction):
     )
     try:
         preview_message = await channel.send(
-            content="🧪 Test welcome poruka",
+            content=f"{CUSTOM_EMOJI['sparkles']} Test welcome poruka",
             embed=build_welcome_embed(interaction.user, interaction.guild, cfg, test=True),
             view=view,
             allowed_mentions=discord.AllowedMentions.none(),
@@ -4206,7 +4182,7 @@ async def welcome_test(interaction: discord.Interaction):
         await interaction.edit_original_response(content=f"Test welcome nije poslan: {exc}")
         return
     await interaction.edit_original_response(
-        content=f"✅ Test welcome poruka je poslata u {channel.mention}."
+        content=f"{CUSTOM_EMOJI['check']} Test welcome poruka je poslata u {channel.mention}."
     )
 
 @bot.tree.command(name="welcome-iskljuci", description="[ADMIN] Isključi automatske welcome poruke")
@@ -4224,7 +4200,7 @@ async def welcome_iskljuci(interaction: discord.Interaction):
     cfg["enabled"] = False
     save_data(data)
     await interaction.response.send_message(
-        "✅ Automatske welcome poruke u server kanalu su isključene. "
+        f"{CUSTOM_EMOJI['check']} Automatske welcome poruke u server kanalu su isključene. "
         "Podešavanja ostalih kanala su sačuvana.",
         ephemeral=True,
     )
