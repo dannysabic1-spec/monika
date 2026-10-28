@@ -712,25 +712,17 @@ postojeću botovu poruku; ranije objavljene duplikate bot ne briše automatski.
 
 ### Blockquote oznake
 
-Embed poruke koriste početne `>` oznake za željeni blockquote izgled.
-Prazni separator redovi koriste nevidljivi znak, pa se neće prikazati
-samo usamljeni `>` karakter.
+Sav vidljivi tekst u embedovima prikazuje se kao Discord blockquote:
+naslov je zaseban citirani red, a svaka rečenica, oznaka i vrijednost
+dobijaju svoju `>` oznaku. To uključuje opis, nazive i vrijednosti fieldova,
+author tekst i footer tekst. Nazivi fieldova se prikazuju kao citirane oznake
+unutar njihove vrijednosti; postojeći inline raspored fieldova ostaje sačuvan.
+Naslov, opis, slike, thumbnail, boja, timestamp, dugmad i funkcionalnost
+komandi ostaju sačuvani.
 
-- `description`
-- naziva i vrijednosti fieldova
-- footer-a
-- author teksta
-
-Svi field naslovi bez postojeće ikone automatski dobijaju ikonu prije
-naslova, dok se postojeće ikone ne mijenjaju. Nakon izmjene obavezno
-restartuj bota.
-
-### Naslovi i footer
-
-Naslovi embedova se automatski prebacuju u prvi blockquote red unutar
-teksta embed-a, umjesto posebnog Discord naslovnog reda. Ako naslov nema
-ikonu, bot je dodaje ispred naslova. Iz footera se uklanjaju `MONIKA BOT` i
-verzija, pa cooldown ostaje samo kao `Cooldown: 24h`.
+Naslov bez postojeće ikone automatski dobija ikonu prije teksta, a postojeće
+ikone ostaju iste. Iz footera se uklanjaju `MONIKA BOT` i verzija, pa cooldown
+ostaje samo kao `Cooldown: 24h`. Nakon izmjene obavezno restartuj bota.
 
 Važno:
 

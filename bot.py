@@ -266,10 +266,10 @@ try:
 except Exception:
     pass
 
-# Ujednačava formatiranje teksta u embedovima bez mijenjanja njegovog sadržaja.
+# Ujednačava blockquote format u svim embedovima bez mijenjanja njihovog teksta.
 _ORIGINAL_EMBED_TO_DICT = discord.Embed.to_dict
 
-def _remove_embed_blockquotes(value):
+def _blockquote_embed_text(value):
     if isinstance(value, str):
         # U embedovima zamijeni obične Unicode emoji-je odgovarajućim
         # application emoji-jem. Tako se na Discordu prikazuju samo
@@ -296,34 +296,80 @@ def _remove_embed_blockquotes(value):
         # embedu, uključujući znakove koje nove komande eventualno dodaju.
         # Custom Discord emoji format (<:Name:ID>) nije obuhvaćen ovim regexom.
         value = _UNICODE_EMOJI_RE.sub(CUSTOM_EMOJI["square"], value)
-        # Ukloni samo Markdown blockquote prefiks i njegov nevidljivi
-        # separator; riječi, emoji i redoslijed sadržaja ostaju isti.
-        cleaned = re.sub(r"(?m)^> ?(?:\u200b)?", "", value)
-        return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    if isinstance(value, list):
-        return [_remove_embed_blockquotes(item) for item in value]
-    if isinstance(value, dict):
-        return {
-            key: _remove_embed_blockquotes(item)
-            for key, item in value.items()
-        }
+        # Remove old quote marks first so the formatter is safe to run on
+        # embeds that already contain them.
+        cleaned = re.sub(r"(?m)^>+ ?(?:\u200b)?", "", value)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+        if not cleaned:
+            return ""
+
+        quoted_lines = []
+        for raw_line in cleaned.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            # Put each sentence on its own quoted line. Existing line breaks
+            # are also preserved as separate quoted lines.
+            sentences = re.split(r"(?<=[.!?])\s+(?=[^\s])", line)
+            quoted_lines.extend(
+                f"> {sentence.strip()}"
+                for sentence in sentences
+                if sentence.strip()
+            )
+        return "\n".join(quoted_lines)
     return value
 
 def _clean_embed_to_dict(self):
     payload = _ORIGINAL_EMBED_TO_DICT(self)
-    payload = _remove_embed_blockquotes(payload)
 
-    # Koristi Discordovo pravo title polje umjesto dodavanja naslova u opis.
-    # Tako naslov ostaje kratak i ne zauzima dodatne redove na telefonu.
-    title = payload.get("title")
+    # Discord ne prikazuje blockquote format u title, author i footer poljima.
+    # Svi tekstualni dijelovi zato se slažu u description, gdje se format
+    # prikazuje jednako; slike, boja, thumbnail i timestamp ostaju netaknuti.
+    author = payload.pop("author", None)
+    title = payload.pop("title", None)
+    description = payload.pop("description", None)
+    fields = payload.pop("fields", [])
+    footer = payload.pop("footer", None)
+    title_url = payload.pop("url", None)
+    text_blocks = []
+
+    def add_text_block(text):
+        formatted = _blockquote_embed_text(text)
+        if formatted:
+            text_blocks.append(formatted)
+
+    if isinstance(author, dict):
+        author_name = author.get("name")
+        if author_name and author.get("url"):
+            author_name = f"[{author_name}]({author['url']})"
+        add_text_block(author_name)
+
     if title:
         if title[0].isascii() and title[0].isalpha():
             title = f"{CUSTOM_EMOJI['info']} {title}"
-        payload["title"] = title
+        if title_url:
+            title = f"[{title}]({title_url})"
+        add_text_block(title)
 
-    # Zadrži postojeći tekst footera, ali u Discordovom footer polju umjesto
-    # da ga dodaješ u opis. Ime i verzija bota se i dalje izostavljaju.
-    footer = payload.get("footer")
+    add_text_block(description)
+
+    formatted_fields = []
+    if isinstance(fields, list):
+        for field in fields:
+            if not isinstance(field, dict):
+                continue
+            quoted_name = _blockquote_embed_text(field.get("name"))
+            quoted_value = _blockquote_embed_text(field.get("value"))
+            field_lines = [text for text in (quoted_name, quoted_value) if text]
+            if not field_lines:
+                continue
+            # Field names do not render blockquotes in Discord. Put the bold
+            # label inside the quoted field value and keep inline layout.
+            field["name"] = "\u200b"
+            field["value"] = "\n".join(field_lines)
+            formatted_fields.append(field)
+
+    footer_text = ""
     if isinstance(footer, dict) and isinstance(footer.get("text"), str):
         footer_text = re.sub(
             rf"\b{re.escape(BOT_NAME)}(?:\s+{re.escape(VERSION)})?\b",
@@ -331,15 +377,36 @@ def _clean_embed_to_dict(self):
             footer["text"],
         )
         footer_text = re.sub(r"\s*•\s*", " • ", footer_text).strip(" •")
-        if footer_text:
-            footer["text"] = footer_text
+    quoted_footer = _blockquote_embed_text(footer_text)
+
+    if quoted_footer:
+        if len(formatted_fields) < 25:
+            formatted_fields.append({
+                "name": "\u200b",
+                "value": quoted_footer,
+                "inline": False,
+            })
+        elif formatted_fields:
+            formatted_fields[-1]["value"] += f"\n{quoted_footer}"
         else:
-            payload.pop("footer", None)
+            text_blocks.append(quoted_footer)
+
+    if text_blocks:
+        payload["description"] = "\n".join(text_blocks)
+    if formatted_fields:
+        payload["fields"] = formatted_fields
+
+    # Retain decorative author/footer icons without leaving unquoted visible
+    # text in those Discord fields.
+    if isinstance(author, dict) and author.get("icon_url"):
+        payload["author"] = {"name": "\u200b", "icon_url": author["icon_url"]}
+    if isinstance(footer, dict) and footer.get("icon_url"):
+        payload["footer"] = {"text": "\u200b", "icon_url": footer["icon_url"]}
     return payload
 
 discord.Embed.to_dict = _clean_embed_to_dict
 
-# Svaki embed field dobija ikonu prije naslova ako je naslov već nema.
+# Svaki embed field dobija ikonu prije oznake ako je već nema.
 # Postojeće ikone i custom emoji-ji ostaju netaknuti.
 _ORIGINAL_EMBED_ADD_FIELD = discord.Embed.add_field
 
